@@ -84,10 +84,10 @@ export {
   isEventPayloadArray,
   createEvent,
   createBatchEvents,
-  createInngestTestingModule,
-  MockInngestService,
-  createMockInngestContext,
 } from './utils';
+
+// Note: Testing utilities have been moved to '@torixtv/nestjs-inngest/testing'
+// Import them from there to avoid loading @nestjs/testing in production builds
 
 // Re-export commonly used types from Inngest
 export type {
