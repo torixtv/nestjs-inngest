@@ -197,6 +197,21 @@ export const createDefaultConfig = (
 function readEnvironmentConfig(): Partial<InngestModuleOptions> {
   const envConfig: Partial<InngestModuleOptions> = {};
 
+  // Read baseUrl from INNGEST_BASE_URL
+  if (process.env.INNGEST_BASE_URL) {
+    envConfig.baseUrl = process.env.INNGEST_BASE_URL;
+  }
+
+  // Read eventKey from INNGEST_EVENT_KEY
+  if (process.env.INNGEST_EVENT_KEY) {
+    envConfig.eventKey = process.env.INNGEST_EVENT_KEY;
+  }
+
+  // Read signingKey from INNGEST_SIGNING_KEY
+  if (process.env.INNGEST_SIGNING_KEY) {
+    envConfig.signingKey = process.env.INNGEST_SIGNING_KEY;
+  }
+
   // Read servePort from INNGEST_SERVE_PORT or PORT
   if (process.env.INNGEST_SERVE_PORT) {
     const port = parseInt(process.env.INNGEST_SERVE_PORT, 10);
@@ -220,6 +235,19 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     envConfig.path = process.env.INNGEST_PATH;
   }
 
+  // Read appVersion from INNGEST_APP_VERSION or npm_package_version
+  if (process.env.INNGEST_APP_VERSION) {
+    if (!envConfig.clientOptions) {
+      envConfig.clientOptions = {};
+    }
+    envConfig.clientOptions.appVersion = process.env.INNGEST_APP_VERSION;
+  } else if (process.env.npm_package_version) {
+    if (!envConfig.clientOptions) {
+      envConfig.clientOptions = {};
+    }
+    envConfig.clientOptions.appVersion = process.env.npm_package_version;
+  }
+
   return envConfig;
 }
 
@@ -227,7 +255,14 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
  * Merge user configuration with environment defaults
  * Configuration precedence (highest to lowest):
  * 1. Explicit userConfig
- * 2. Environment variables (INNGEST_SERVE_PORT, INNGEST_SERVE_HOST, INNGEST_PATH, PORT)
+ * 2. Environment variables:
+ *    - INNGEST_BASE_URL: Base URL for Inngest server
+ *    - INNGEST_EVENT_KEY: Event key for sending events
+ *    - INNGEST_SIGNING_KEY: Signing key for authentication
+ *    - INNGEST_SERVE_PORT or PORT: Port where app is running
+ *    - INNGEST_SERVE_HOST: Host where app is accessible
+ *    - INNGEST_PATH: Path for Inngest endpoint
+ *    - INNGEST_APP_VERSION or npm_package_version: Application version
  * 3. Package defaults
  */
 export function mergeWithDefaults(userConfig: any, environment?: string): any {
@@ -236,10 +271,22 @@ export function mergeWithDefaults(userConfig: any, environment?: string): any {
   const envConfig = readEnvironmentConfig();
 
   // Apply precedence: defaults < envConfig < userConfig
-  return {
+  // Special handling for nested clientOptions to preserve env vars like appVersion
+  const merged = {
     ...defaults,
     ...envConfig,
     ...userConfig,
     environment: env,
   };
+
+  // Deep merge clientOptions to preserve env-based values unless explicitly overridden
+  if (defaults.clientOptions || envConfig.clientOptions || userConfig.clientOptions) {
+    merged.clientOptions = {
+      ...defaults.clientOptions,
+      ...envConfig.clientOptions,
+      ...userConfig.clientOptions,
+    };
+  }
+
+  return merged;
 }

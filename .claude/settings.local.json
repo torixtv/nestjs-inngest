@@ -16,7 +16,14 @@
       "WebSearch",
       "Bash(PORT=3003 npm run start:e2e:dev)",
       "Bash(npm run test:e2e:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(kubectl get services -A)",
+      "Bash(kubectl logs users-service-6646c6dd79-s9xg4 --tail=100)",
+      "Bash(kubectl describe pod users-service-6646c6dd79-s9xg4)",
+      "Bash(kubectl logs users-service-6646c6dd79-s9xg4 --tail=200 --timestamps)",
+      "Bash(kubectl logs users-service-6646c6dd79-s9xg4 --previous --tail=50)",
+      "Bash(kubectl logs users-service-6646c6dd79-s9xg4 --tail=500)",
+      "mcp__context7__resolve-library-id"
     ],
     "deny": [],
     "ask": []
