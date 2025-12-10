@@ -4,10 +4,12 @@ import {
   createBatchEvents,
   isEventPayload,
   isEventPayloadArray,
+} from '../src/utils';
+import {
   createInngestTestingModule,
   MockInngestService,
   createMockInngestContext,
-} from '../src/utils';
+} from '../src/testing';
 
 describe('Utils', () => {
   describe('createEvent', () => {

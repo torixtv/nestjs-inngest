@@ -46,8 +46,13 @@ export class InngestModule {
     const mergedOptions = mergeWithDefaults(options);
     const validatedOptions = validateConfig(mergedOptions);
 
-    // Create dynamic controller with configured path
-    const DynamicInngestController = createInngestController(validatedOptions.path);
+    // Determine if we're in connect mode (no controller needed)
+    const isConnectMode = validatedOptions.mode === 'connect';
+
+    // Create dynamic controller with configured path (only for serve mode)
+    const controllers = isConnectMode
+      ? []
+      : [createInngestController(validatedOptions.path)];
 
     const imports = [DiscoveryModule];
 
@@ -90,11 +95,19 @@ export class InngestModule {
         InngestService,
         InngestExplorer,
       ],
-      controllers: [DynamicInngestController],
+      controllers, // Empty array for connect mode, controller for serve mode
       exports,
     };
   }
 
+  /**
+   * Async configuration for InngestModule
+   *
+   * Note: For forRootAsync, the controller is always included because the mode
+   * is not known at module definition time. In connect mode, the controller
+   * endpoints simply won't be called by Inngest (it uses WebSocket instead).
+   * This has no performance impact - the routes just exist but are unused.
+   */
   static forRootAsync(options: InngestModuleAsyncOptions): DynamicModule {
     const providers: Provider[] = [];
 
