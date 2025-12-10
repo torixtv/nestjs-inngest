@@ -40,6 +40,9 @@ export {
   InngestMonitoringConfig,
   InngestHealthConfig,
   InngestTracingConfig,
+  // Connection mode types
+  InngestConnectionMode,
+  InngestConnectOptions,
 } from './interfaces';
 
 // Configuration validation exports
@@ -50,12 +53,14 @@ export {
   InngestConfigSchema,
   DevelopmentConfigSchema,
   ProductionConfigSchema,
+  ConnectOptionsSchema,
 } from './config/validation';
 
 // Health check exports
 export {
   InngestHealthModule,
   InngestHealthService,
+  InngestHealthIndicator,
   HealthCheckResult,
   SystemHealth,
   InngestHealthStatus,

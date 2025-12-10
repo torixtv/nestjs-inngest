@@ -121,6 +121,51 @@ export class InngestHealthService {
   }
 
   /**
+   * Get connection health for connect mode
+   * Useful for monitoring WebSocket connection state
+   */
+  async getConnectionHealth(): Promise<HealthCheckResult> {
+    const options = this.inngestService.getOptions();
+
+    if (options.mode !== 'connect') {
+      return {
+        status: 'healthy',
+        message: 'Serve mode - HTTP endpoint ready',
+        details: { mode: 'serve' },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const state = this.inngestService.getConnectionState();
+
+    switch (state) {
+      case 'ACTIVE':
+        return {
+          status: 'healthy',
+          message: 'WebSocket connection active',
+          details: { mode: 'connect', state },
+          timestamp: new Date().toISOString(),
+        };
+      case 'CONNECTING':
+      case 'RECONNECTING':
+      case 'PAUSED':
+        return {
+          status: 'degraded',
+          message: `Connection state: ${state}`,
+          details: { mode: 'connect', state },
+          timestamp: new Date().toISOString(),
+        };
+      default:
+        return {
+          status: 'unhealthy',
+          message: 'Connection not active',
+          details: { mode: 'connect', state },
+          timestamp: new Date().toISOString(),
+        };
+    }
+  }
+
+  /**
    * Quick liveness check
    */
   async liveness(): Promise<HealthCheckResult> {
@@ -152,6 +197,7 @@ export class InngestHealthService {
 
   /**
    * Readiness check for deployments
+   * For connect mode, also verifies WebSocket connection is active
    */
   async readiness(): Promise<HealthCheckResult> {
     const startTime = Date.now();
@@ -160,6 +206,7 @@ export class InngestHealthService {
       // Check if the service is ready to handle requests
       const functions = this.inngestService.getFunctions();
       const client = this.inngestService.getClient();
+      const options = this.inngestService.getOptions();
 
       if (!client) {
         return {
@@ -169,14 +216,35 @@ export class InngestHealthService {
         };
       }
 
+      // For connect mode, verify the WebSocket connection is active
+      if (options.mode === 'connect') {
+        const connectionState = this.inngestService.getConnectionState();
+        if (connectionState !== 'ACTIVE') {
+          return {
+            status: 'unhealthy',
+            message: `Worker not ready: connection state is ${connectionState}`,
+            details: {
+              mode: 'connect',
+              connectionState,
+              functionsRegistered: functions.length,
+            },
+            timestamp: new Date().toISOString(),
+          };
+        }
+      }
+
       const responseTime = Date.now() - startTime;
 
       return {
         status: 'healthy',
         message: 'Service is ready',
         details: {
+          mode: options.mode || 'serve',
           functionsRegistered: functions.length,
           clientInitialized: !!client,
+          ...(options.mode === 'connect' && {
+            connectionState: this.inngestService.getConnectionState(),
+          }),
           responseTime,
         },
         timestamp: new Date().toISOString(),
@@ -232,6 +300,7 @@ export class InngestHealthService {
     try {
       const functions = this.inngestService.getFunctions();
       const client = this.inngestService.getClient();
+      const options = this.inngestService.getOptions();
       const connectivity = !!client;
 
       let status: 'healthy' | 'unhealthy' | 'degraded' = 'healthy';
@@ -243,6 +312,22 @@ export class InngestHealthService {
       } else if (functions.length === 0) {
         status = 'degraded';
         message = 'No functions registered';
+      } else if (options.mode === 'connect') {
+        // For connect mode, also check connection state
+        const connectionState = this.inngestService.getConnectionState();
+        if (connectionState !== 'ACTIVE') {
+          if (
+            connectionState === 'CONNECTING' ||
+            connectionState === 'RECONNECTING' ||
+            connectionState === 'PAUSED'
+          ) {
+            status = 'degraded';
+            message = `Connection state: ${connectionState}`;
+          } else {
+            status = 'unhealthy';
+            message = `Connection not active: ${connectionState}`;
+          }
+        }
       }
 
       return {

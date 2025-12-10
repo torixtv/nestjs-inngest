@@ -1,6 +1,66 @@
 import { InngestMiddleware, ClientOptions } from 'inngest';
 import { ModuleMetadata, Type } from '@nestjs/common';
 
+/**
+ * Connection mode for Inngest
+ * - 'serve': HTTP webhook-based (default, current behavior)
+ * - 'connect': WebSocket worker-based persistent connection
+ */
+export type InngestConnectionMode = 'serve' | 'connect';
+
+/**
+ * Connect mode specific options
+ */
+export interface InngestConnectOptions {
+  /**
+   * Unique identifier for this worker instance.
+   * In containerized environments, use pod/container ID.
+   * Defaults to process.env.HOSTNAME or auto-detected platform ID.
+   *
+   * Common platform environment variables auto-detected:
+   * - HOSTNAME (general containers)
+   * - FLY_MACHINE_ID (Fly.io)
+   * - RENDER_INSTANCE_ID (Render)
+   * - K_REVISION (Knative/Cloud Run)
+   */
+  instanceId?: string;
+
+  /**
+   * Maximum concurrent function steps this worker can handle.
+   * Helps with load distribution and preventing worker overload.
+   */
+  maxConcurrency?: number;
+
+  /**
+   * List of shutdown signals to handle for graceful shutdown.
+   * By default, handles SIGINT and SIGTERM.
+   * Set to an empty array to disable automatic signal handling.
+   * @default ['SIGINT', 'SIGTERM']
+   * @example
+   * ```typescript
+   * // Disable automatic signal handling
+   * handleShutdownSignals: []
+   *
+   * // Only handle SIGTERM
+   * handleShutdownSignals: ['SIGTERM']
+   * ```
+   */
+  handleShutdownSignals?: string[];
+
+  /**
+   * Custom function to rewrite the gateway endpoint URL.
+   * Useful for self-hosted Inngest or custom network configurations.
+   */
+  rewriteGatewayEndpoint?: (url: string) => string;
+
+  /**
+   * Graceful shutdown timeout in milliseconds.
+   * After this timeout, the connection will be forcibly closed.
+   * @default 30000
+   */
+  shutdownTimeout?: number;
+}
+
 export interface InngestMonitoringConfig {
   enabled: boolean;
   collectMetrics: boolean;
@@ -167,6 +227,45 @@ export interface InngestModuleOptions {
    * Tracing configuration
    */
   tracing?: InngestTracingConfig;
+
+  /**
+   * Connection mode: 'serve' (HTTP webhook) or 'connect' (WebSocket worker)
+   *
+   * - 'serve' (default): Creates an HTTP endpoint to serve Inngest functions.
+   *   Use this for traditional web applications, serverless, or when running
+   *   with the Inngest dev server.
+   *
+   * - 'connect': Establishes a persistent WebSocket connection to Inngest.
+   *   Use this for dedicated worker processes, containers, or when you need
+   *   lower latency between function invocations.
+   *
+   * @default 'serve'
+   *
+   * @example
+   * ```typescript
+   * // Default serve mode (HTTP)
+   * InngestModule.forRoot({
+   *   id: 'my-app',
+   *   baseUrl: 'http://localhost:8288',
+   * })
+   *
+   * // Connect mode (WebSocket)
+   * InngestModule.forRoot({
+   *   id: 'my-app',
+   *   mode: 'connect',
+   *   connect: {
+   *     instanceId: process.env.POD_NAME,
+   *     maxConcurrency: 10,
+   *   },
+   * })
+   * ```
+   */
+  mode?: InngestConnectionMode;
+
+  /**
+   * Connect mode specific options (only used when mode is 'connect')
+   */
+  connect?: InngestConnectOptions;
 }
 
 export interface InngestModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {

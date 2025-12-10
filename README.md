@@ -15,6 +15,7 @@ Modern NestJS integration for [Inngest](https://inngest.com) - the durable funct
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
 - [Advanced Features](#advanced-features)
+- [Connection Modes](#connection-modes)
 - [Real-World Examples](#real-world-examples)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -685,6 +686,81 @@ GET /health/inngest?details=true
 }
 ```
 
+#### @nestjs/terminus Integration
+
+For Kubernetes readiness/liveness probes or existing `@nestjs/terminus` health check setups, use the `InngestHealthIndicator`:
+
+```bash
+# Install @nestjs/terminus (optional peer dependency)
+npm install @nestjs/terminus
+```
+
+```typescript
+// health.module.ts
+import { Module } from '@nestjs/common';
+import { TerminusModule } from '@nestjs/terminus';
+import { InngestHealthIndicator } from '@torixtv/nestjs-inngest';
+import { HealthController } from './health.controller';
+
+@Module({
+  imports: [TerminusModule],
+  providers: [InngestHealthIndicator],
+  controllers: [HealthController],
+})
+export class HealthModule {}
+```
+
+```typescript
+// health.controller.ts
+import { Controller, Get } from '@nestjs/common';
+import { HealthCheck, HealthCheckService, HealthCheckResult } from '@nestjs/terminus';
+import { InngestHealthIndicator } from '@torixtv/nestjs-inngest';
+
+@Controller('health')
+export class HealthController {
+  constructor(
+    private health: HealthCheckService,
+    private inngest: InngestHealthIndicator,
+  ) {}
+
+  @Get('liveness')
+  @HealthCheck()
+  liveness(): Promise<HealthCheckResult> {
+    return this.health.check([
+      () => this.inngest.isHealthy('inngest'),
+    ]);
+  }
+
+  @Get('readiness')
+  @HealthCheck()
+  readiness(): Promise<HealthCheckResult> {
+    return this.health.check([
+      () => this.inngest.isReady('inngest'),
+    ]);
+  }
+}
+```
+
+The health indicator is connection-mode aware:
+- **Serve mode**: Returns healthy if Inngest client is initialized
+- **Connect mode**: Returns healthy only when WebSocket connection is `ACTIVE`
+
+Response includes `mode` and `connectionState` fields:
+
+```json
+{
+  "status": "ok",
+  "info": {
+    "inngest": {
+      "status": "up",
+      "message": "Inngest worker is connected",
+      "mode": "connect",
+      "connectionState": "ACTIVE"
+    }
+  }
+}
+```
+
 ### Configuration
 
 #### Environment-Based Configuration
@@ -1064,6 +1140,233 @@ async function bootstrap() {
 - Multiple NestJS apps with Inngest on different ports
 - Load balancers or reverse proxies require specific host settings
 - Kubernetes deployments with service DNS
+
+## Connection Modes
+
+The module supports two connection modes for communicating with Inngest:
+
+### Serve Mode (Default)
+
+**Serve mode** is the traditional HTTP webhook-based approach. Your NestJS application exposes an HTTP endpoint that Inngest calls to execute functions.
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'serve', // Default - can be omitted
+  baseUrl: 'http://localhost:8288',
+})
+```
+
+**Characteristics:**
+- Uses HTTP webhooks - Inngest calls your `/api/inngest` endpoint
+- Requires your app to be publicly accessible (or tunneled in development)
+- Traditional request-response model
+- Good for serverless environments (Vercel, AWS Lambda, etc.)
+
+### Connect Mode
+
+**Connect mode** uses a persistent WebSocket connection. Your application connects to Inngest and pulls work, rather than Inngest pushing work to your app via HTTP.
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'connect',
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+  connect: {
+    instanceId: 'worker-1',        // Optional: unique identifier for this worker
+    maxConcurrency: 10,            // Optional: max concurrent function executions
+    shutdownTimeout: 30000,        // Optional: graceful shutdown timeout in ms
+    handleShutdownSignals: ['SIGTERM', 'SIGINT'], // Optional: signals to handle
+  },
+})
+```
+
+**Characteristics:**
+- Persistent WebSocket connection - your app connects to Inngest
+- No need for public HTTP endpoint - works behind firewalls
+- Ideal for Kubernetes, Docker, and containerized environments
+- Better for long-running workers and high-throughput scenarios
+- Automatic reconnection handling
+
+### When to Use Each Mode
+
+| Use Case | Recommended Mode |
+|----------|------------------|
+| Serverless (Vercel, Lambda) | Serve |
+| Kubernetes deployment | Connect |
+| Behind corporate firewall | Connect |
+| Development with Inngest CLI | Serve |
+| Long-running workers | Connect |
+| Hybrid cloud/on-prem | Connect |
+
+### Environment Variable Configuration
+
+You can also set the mode via environment variable:
+
+```bash
+# Set mode via environment variable
+INNGEST_MODE=connect npm run start
+
+# Or in your .env file
+INNGEST_MODE=connect
+```
+
+### Connect Mode Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `instanceId` | `string` | Auto-generated UUID | Unique identifier for this worker instance |
+| `maxConcurrency` | `number` | `undefined` | Maximum concurrent function executions |
+| `shutdownTimeout` | `number` | `30000` | Time in ms to wait for graceful shutdown |
+| `handleShutdownSignals` | `string[]` | `['SIGTERM', 'SIGINT']` | Process signals to handle for shutdown |
+
+### Connection State API
+
+When using connect mode, you can monitor the connection state:
+
+```typescript
+@Injectable()
+export class MyService {
+  constructor(private readonly inngestService: InngestService) {}
+
+  checkConnection() {
+    // Get current connection state
+    const state = this.inngestService.getConnectionState();
+    // Returns: 'ACTIVE' | 'CONNECTING' | 'RECONNECTING' | 'PAUSED' | 'CLOSING' | 'CLOSED' | 'NOT_APPLICABLE'
+
+    // Simple connected check
+    const isConnected = this.inngestService.isConnected();
+    // Returns true only if state is 'ACTIVE'
+
+    console.log(`Connection state: ${state}, connected: ${isConnected}`);
+  }
+}
+```
+
+**Connection States:**
+- `ACTIVE` - Connected and ready to receive work
+- `CONNECTING` - Initial connection in progress
+- `RECONNECTING` - Reconnecting after disconnect
+- `PAUSED` - Connection temporarily paused
+- `CLOSING` - Graceful shutdown in progress
+- `CLOSED` - Connection closed
+- `NOT_APPLICABLE` - Using serve mode (no persistent connection)
+
+### Health Checks with Connect Mode
+
+The health service is connection-aware and reports appropriate status:
+
+```typescript
+// In serve mode
+GET /health/inngest
+{
+  "status": "ok",
+  "info": {
+    "inngest": {
+      "status": "up",
+      "mode": "serve",
+      "functions": 22
+    }
+  }
+}
+
+// In connect mode
+GET /health/inngest
+{
+  "status": "ok",
+  "info": {
+    "inngest": {
+      "status": "up",
+      "mode": "connect",
+      "connectionState": "ACTIVE",
+      "functions": 22
+    }
+  }
+}
+```
+
+### Kubernetes Deployment with Connect Mode
+
+Connect mode is ideal for Kubernetes because your pods don't need to be publicly accessible:
+
+```yaml
+# k8s-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inngest-worker
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: my-app:latest
+        env:
+        - name: INNGEST_MODE
+          value: "connect"
+        - name: INNGEST_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              name: inngest-secrets
+              key: signing-key
+        # Each pod gets a unique instance ID from metadata
+        - name: INNGEST_INSTANCE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        livenessProbe:
+          httpGet:
+            path: /health/inngest
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+```
+
+```typescript
+// Configuration using K8s environment
+InngestModule.forRootAsync({
+  useFactory: () => ({
+    id: process.env.INNGEST_APP_ID,
+    mode: 'connect',
+    signingKey: process.env.INNGEST_SIGNING_KEY,
+    connect: {
+      instanceId: process.env.INNGEST_INSTANCE_ID, // From K8s metadata.name
+      maxConcurrency: 5,
+      shutdownTimeout: 60000, // Give K8s time for graceful shutdown
+    },
+  }),
+})
+```
+
+### Graceful Shutdown
+
+Connect mode handles graceful shutdown automatically:
+
+1. When a shutdown signal is received (SIGTERM, SIGINT)
+2. The module stops accepting new work
+3. Waits for in-progress functions to complete (up to `shutdownTimeout`)
+4. Closes the WebSocket connection
+5. Allows NestJS to complete shutdown
+
+To customize shutdown behavior:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'connect',
+  connect: {
+    // Only handle SIGTERM (useful when you handle SIGINT yourself)
+    handleShutdownSignals: ['SIGTERM'],
+
+    // Or disable automatic signal handling entirely
+    // handleShutdownSignals: [],
+
+    // Extended timeout for long-running functions
+    shutdownTimeout: 120000, // 2 minutes
+  },
+})
+```
 
 ## Real-World Examples
 
@@ -1722,7 +2025,9 @@ export class NotificationService {
 | `baseUrl` | `string` | `undefined` | Inngest server URL (omit for cloud) |
 | `signingKey` | `string` | `undefined` | Webhook signing key for production |
 | `isGlobal` | `boolean` | `false` | Make module available globally |
-| `path` | `string` | `'inngest'` | API endpoint path |
+| `mode` | `'serve' \| 'connect'` | `'serve'` | Connection mode: HTTP webhooks or WebSocket |
+| `connect` | `InngestConnectOptions` | `{}` | Connect mode configuration (see [Connection Modes](#connection-modes)) |
+| `path` | `string` | `'inngest'` | API endpoint path (serve mode only) |
 | `servePort` | `number` | `process.env.PORT \|\| 3000` | Port where your app runs (for auto-registration) |
 | `serveHost` | `string` | `'localhost'` | Host/URL where your app runs. Can be hostname (`'localhost'`) or full URL (`'https://myapp.com'`) |
 | `environment` | `string` | `'development'` | Environment name |
@@ -1795,12 +2100,40 @@ Shorthand for scheduled functions.
 class InngestService {
   // Send single event
   send(event: EventPayload): Promise<void>
-  
+
   // Send multiple events
   send(events: EventPayload[]): Promise<void>
-  
+
   // Get Inngest client instance
   getClient(): Inngest
+
+  // Get current connection state (connect mode only)
+  getConnectionState(): 'ACTIVE' | 'CONNECTING' | 'RECONNECTING' | 'PAUSED' | 'CLOSING' | 'CLOSED' | 'NOT_APPLICABLE'
+
+  // Check if actively connected (connect mode only)
+  isConnected(): boolean
+
+  // Get module options
+  getOptions(): InngestModuleOptions
+
+  // Get registered functions
+  getFunctions(): InngestFunction[]
+}
+```
+
+### InngestHealthIndicator Methods
+
+For use with `@nestjs/terminus` health checks:
+
+```typescript
+class InngestHealthIndicator {
+  // Check if Inngest is healthy
+  // - Serve mode: client is initialized
+  // - Connect mode: WebSocket connection is ACTIVE
+  isHealthy(key: string): Promise<HealthIndicatorResult>
+
+  // Check if Inngest is ready (includes function registration check)
+  isReady(key: string): Promise<HealthIndicatorResult>
 }
 ```
 

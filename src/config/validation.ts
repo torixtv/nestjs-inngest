@@ -2,6 +2,19 @@ import { z } from 'zod';
 import { InngestModuleOptions, InngestModuleAsyncOptions } from '../interfaces';
 
 /**
+ * Connect mode specific options schema
+ */
+export const ConnectOptionsSchema = z
+  .object({
+    instanceId: z.string().optional(),
+    maxConcurrency: z.number().min(1).optional(),
+    handleShutdownSignals: z.array(z.string()).optional(),
+    shutdownTimeout: z.number().min(1000).default(30000),
+    // Note: rewriteGatewayEndpoint is a function, validated at runtime if provided
+  })
+  .optional();
+
+/**
  * Base configuration validation schema
  */
 export const InngestConfigSchema = z.object({
@@ -16,6 +29,10 @@ export const InngestConfigSchema = z.object({
   serveHost: z.string().optional(),
   signingKey: z.string().optional(),
   logger: z.any().optional(),
+
+  // Connection mode
+  mode: z.enum(['serve', 'connect']).default('serve'),
+  connect: ConnectOptionsSchema,
 
   // Environment configuration
   environment: z.enum(['development', 'staging', 'production', 'test']).default('development'),
@@ -248,6 +265,52 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     envConfig.clientOptions.appVersion = process.env.npm_package_version;
   }
 
+  // Read mode from INNGEST_MODE
+  if (process.env.INNGEST_MODE) {
+    const mode = process.env.INNGEST_MODE.toLowerCase();
+    if (mode === 'serve' || mode === 'connect') {
+      envConfig.mode = mode as 'serve' | 'connect';
+    }
+  }
+
+  // Read connect mode options
+  // Instance ID: explicit env var or auto-detect from common platform env vars
+  const instanceId =
+    process.env.INNGEST_INSTANCE_ID ||
+    process.env.HOSTNAME ||
+    process.env.FLY_MACHINE_ID ||
+    process.env.RENDER_INSTANCE_ID ||
+    process.env.K_REVISION;
+
+  if (instanceId) {
+    if (!envConfig.connect) {
+      envConfig.connect = {};
+    }
+    envConfig.connect.instanceId = instanceId;
+  }
+
+  // Read maxConcurrency from INNGEST_MAX_CONCURRENCY
+  if (process.env.INNGEST_MAX_CONCURRENCY) {
+    const concurrency = parseInt(process.env.INNGEST_MAX_CONCURRENCY, 10);
+    if (!isNaN(concurrency) && concurrency > 0) {
+      if (!envConfig.connect) {
+        envConfig.connect = {};
+      }
+      envConfig.connect.maxConcurrency = concurrency;
+    }
+  }
+
+  // Read shutdownTimeout from INNGEST_SHUTDOWN_TIMEOUT
+  if (process.env.INNGEST_SHUTDOWN_TIMEOUT) {
+    const timeout = parseInt(process.env.INNGEST_SHUTDOWN_TIMEOUT, 10);
+    if (!isNaN(timeout) && timeout >= 1000) {
+      if (!envConfig.connect) {
+        envConfig.connect = {};
+      }
+      envConfig.connect.shutdownTimeout = timeout;
+    }
+  }
+
   return envConfig;
 }
 
@@ -263,6 +326,10 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
  *    - INNGEST_SERVE_HOST: Host where app is accessible
  *    - INNGEST_PATH: Path for Inngest endpoint
  *    - INNGEST_APP_VERSION or npm_package_version: Application version
+ *    - INNGEST_MODE: Connection mode ('serve' or 'connect')
+ *    - INNGEST_INSTANCE_ID: Worker instance ID (or auto-detected from HOSTNAME, FLY_MACHINE_ID, etc.)
+ *    - INNGEST_MAX_CONCURRENCY: Maximum concurrent function executions
+ *    - INNGEST_SHUTDOWN_TIMEOUT: Graceful shutdown timeout in milliseconds
  * 3. Package defaults
  */
 export function mergeWithDefaults(userConfig: any, environment?: string): any {
@@ -285,6 +352,14 @@ export function mergeWithDefaults(userConfig: any, environment?: string): any {
       ...defaults.clientOptions,
       ...envConfig.clientOptions,
       ...userConfig.clientOptions,
+    };
+  }
+
+  // Deep merge connect options to preserve env-based values unless explicitly overridden
+  if (envConfig.connect || userConfig.connect) {
+    merged.connect = {
+      ...envConfig.connect,
+      ...userConfig.connect,
     };
   }
 

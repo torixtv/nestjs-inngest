@@ -5,3 +5,4 @@ export {
   SystemHealth,
   InngestHealthStatus,
 } from './health.service';
+export { InngestHealthIndicator } from './inngest-health.indicator';

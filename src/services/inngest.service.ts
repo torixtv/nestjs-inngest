@@ -1,15 +1,36 @@
-import { Injectable, Inject, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+  OnApplicationShutdown,
+  Optional,
+} from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
 import { InngestModuleOptions } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
 import * as otelApi from '@opentelemetry/api';
 
+// Type for the WorkerConnection returned by connect()
+interface WorkerConnection {
+  connectionId: string;
+  state: 'CONNECTING' | 'ACTIVE' | 'PAUSED' | 'RECONNECTING' | 'CLOSING' | 'CLOSED';
+  close: () => Promise<void>;
+  closed: Promise<void>;
+}
+
+// Dynamic import holder for connect module
+let connectModule: typeof import('inngest/connect') | null = null;
+
 @Injectable()
-export class InngestService implements OnModuleInit {
+export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(InngestService.name);
   private inngestClient: Inngest;
   private functions: InngestFunction<any, any, any>[] = [];
+  private workerConnection: WorkerConnection | null = null;
+  private isShuttingDown = false;
 
   constructor(
     @Inject(INNGEST_MODULE_OPTIONS)
@@ -59,7 +80,9 @@ export class InngestService implements OnModuleInit {
   */
 
   async onModuleInit() {
-    this.logger.log(`Initializing Inngest module with app ID: ${this.options.id}`);
+    this.logger.log(`Initializing Inngest module with app ID: ${this.options.id}`, {
+      mode: this.options.mode || 'serve',
+    });
 
     if (this.functions.length > 0) {
       this.logger.log(`Registered ${this.functions.length} Inngest functions`);
@@ -68,15 +91,156 @@ export class InngestService implements OnModuleInit {
     // Skip auto-registration if disabled
     if (this.options.disableAutoRegistration) {
       this.logger.log(
-        'Auto-registration disabled. Call registerWithDevServer() manually when ready.',
+        'Auto-registration disabled. Call registerWithDevServer() or establishConnection() manually when ready.',
       );
       return;
     }
 
-    // Delay auto-registration to allow InngestExplorer to finish discovering functions
-    setTimeout(() => {
-      this.registerWithDevServer();
-    }, 1000);
+    // Branch based on connection mode
+    if (this.options.mode === 'connect') {
+      // Delay connection to allow InngestExplorer to finish discovering functions
+      setTimeout(() => {
+        this.establishConnection();
+      }, 1000);
+    } else {
+      // Default serve mode - register with dev server
+      setTimeout(() => {
+        this.registerWithDevServer();
+      }, 1000);
+    }
+  }
+
+  /**
+   * Lifecycle hook: Called when the module is being destroyed
+   */
+  async onModuleDestroy() {
+    await this.gracefulShutdown('module_destroy');
+  }
+
+  /**
+   * Lifecycle hook: Called when the application is shutting down
+   */
+  async onApplicationShutdown(signal?: string) {
+    await this.gracefulShutdown(`signal_${signal || 'unknown'}`);
+  }
+
+  /**
+   * Establish WebSocket connection to Inngest (connect mode)
+   * Can be called manually if disableAutoRegistration is true
+   */
+  async establishConnection(): Promise<void> {
+    if (this.isShuttingDown) {
+      this.logger.warn('Cannot establish connection: service is shutting down');
+      return;
+    }
+
+    if (this.options.mode !== 'connect') {
+      this.logger.warn('establishConnection() called but mode is not "connect"');
+      return;
+    }
+
+    try {
+      // Dynamic import for compatibility - connect module may not exist in older Inngest versions
+      if (!connectModule) {
+        try {
+          connectModule = await import('inngest/connect');
+        } catch (importError) {
+          this.logger.error(
+            'Failed to import inngest/connect. Make sure you have inngest >= 3.x installed.',
+            { error: importError.message },
+          );
+          throw new Error(
+            'inngest/connect module not available. Connect mode requires inngest >= 3.x',
+          );
+        }
+      }
+
+      const { connect } = connectModule;
+      const connectOptions = this.options.connect || {};
+
+      this.logger.log('Establishing Inngest worker connection', {
+        instanceId: connectOptions.instanceId,
+        maxConcurrency: connectOptions.maxConcurrency,
+        handleShutdownSignals: connectOptions.handleShutdownSignals ?? 'default',
+        functionCount: this.functions.length,
+      });
+
+      // Build connect options, only including defined values
+      const connectConfig = {
+        apps: [
+          {
+            client: this.inngestClient,
+            functions: this.functions,
+          },
+        ],
+        ...(connectOptions.instanceId !== undefined && {
+          instanceId: connectOptions.instanceId,
+        }),
+        ...(connectOptions.maxConcurrency !== undefined && {
+          maxConcurrency: connectOptions.maxConcurrency,
+        }),
+        ...(connectOptions.handleShutdownSignals !== undefined && {
+          handleShutdownSignals: connectOptions.handleShutdownSignals,
+        }),
+        ...(connectOptions.rewriteGatewayEndpoint !== undefined && {
+          rewriteGatewayEndpoint: connectOptions.rewriteGatewayEndpoint,
+        }),
+      };
+
+      this.workerConnection = (await connect(connectConfig as any)) as WorkerConnection;
+
+      this.logger.log('Inngest worker connection established', {
+        state: this.workerConnection.state,
+        instanceId: connectOptions.instanceId,
+        functionCount: this.functions.length,
+      });
+    } catch (error) {
+      this.logger.error('Failed to establish Inngest connection', {
+        error: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Graceful shutdown for connect mode
+   * Waits for in-flight function executions to complete
+   */
+  private async gracefulShutdown(reason: string): Promise<void> {
+    // Only relevant for connect mode with an active connection
+    if (this.options.mode !== 'connect' || !this.workerConnection || this.isShuttingDown) {
+      return;
+    }
+
+    this.isShuttingDown = true;
+    const timeout = this.options.connect?.shutdownTimeout ?? 30000;
+
+    this.logger.log('Initiating graceful shutdown of Inngest worker connection', {
+      reason,
+      timeout,
+      currentState: this.workerConnection.state,
+    });
+
+    try {
+      // Race between graceful close and timeout
+      const closePromise = this.workerConnection.close();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Shutdown timeout exceeded')), timeout),
+      );
+
+      await Promise.race([closePromise, timeoutPromise]);
+      await this.workerConnection.closed;
+
+      this.logger.log('Inngest worker connection closed gracefully');
+    } catch (error) {
+      this.logger.warn('Shutdown did not complete gracefully', {
+        error: error.message,
+        reason,
+      });
+    } finally {
+      this.workerConnection = null;
+    }
   }
 
   /**
@@ -430,6 +594,39 @@ export class InngestService implements OnModuleInit {
    */
   getOptions(): InngestModuleOptions {
     return this.options;
+  }
+
+  // ============ PUBLIC API FOR CONNECT MODE ============
+
+  /**
+   * Get connection state (connect mode only)
+   * Returns 'NOT_APPLICABLE' for serve mode
+   *
+   * Possible states:
+   * - 'NOT_APPLICABLE': Running in serve mode
+   * - 'CONNECTING': Initial connection being established
+   * - 'ACTIVE': Connected and ready to receive function invocations
+   * - 'PAUSED': Connection paused (e.g., during backoff)
+   * - 'RECONNECTING': Temporarily disconnected, attempting to reconnect
+   * - 'CLOSING': Graceful shutdown in progress
+   * - 'CLOSED': Connection has been closed
+   */
+  getConnectionState(): string {
+    if (this.options.mode !== 'connect') {
+      return 'NOT_APPLICABLE';
+    }
+    return this.workerConnection?.state ?? 'CLOSED';
+  }
+
+  /**
+   * Check if the worker connection is active (connect mode only)
+   * Returns false for serve mode (use health checks instead)
+   */
+  isConnected(): boolean {
+    if (this.options.mode !== 'connect') {
+      return false;
+    }
+    return this.workerConnection?.state === 'ACTIVE';
   }
 
   /**

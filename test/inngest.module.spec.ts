@@ -169,4 +169,127 @@ describe('InngestModule', () => {
       await module.close();
     });
   });
+
+  describe('connect mode', () => {
+    it('should configure module with connect mode', async () => {
+      const options: InngestModuleOptions = {
+        id: 'connect-app',
+        mode: 'connect',
+        connect: {
+          instanceId: 'test-worker-1',
+          maxConcurrency: 5,
+          shutdownTimeout: 60000,
+        },
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      expect(service).toBeDefined();
+
+      const mergedOptions = service.getOptions();
+      expect(mergedOptions.mode).toBe('connect');
+      expect(mergedOptions.connect?.instanceId).toBe('test-worker-1');
+      expect(mergedOptions.connect?.maxConcurrency).toBe(5);
+      expect(mergedOptions.connect?.shutdownTimeout).toBe(60000);
+
+      await module.close();
+    });
+
+    it('should default to serve mode when mode is not specified', async () => {
+      const options: InngestModuleOptions = {
+        id: 'default-mode-app',
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      const mergedOptions = service.getOptions();
+
+      expect(mergedOptions.mode).toBe('serve');
+
+      await module.close();
+    });
+
+    it('should return NOT_APPLICABLE for connection state in serve mode', async () => {
+      const options: InngestModuleOptions = {
+        id: 'serve-mode-app',
+        mode: 'serve',
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      expect(service.getConnectionState()).toBe('NOT_APPLICABLE');
+      expect(service.isConnected()).toBe(false);
+
+      await module.close();
+    });
+
+    it('should return CLOSED for connection state in connect mode before connection', async () => {
+      const options: InngestModuleOptions = {
+        id: 'connect-mode-app',
+        mode: 'connect',
+        disableAutoRegistration: true, // Prevent auto-connection
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      expect(service.getConnectionState()).toBe('CLOSED');
+      expect(service.isConnected()).toBe(false);
+
+      await module.close();
+    });
+
+    it('should configure connect mode with handleShutdownSignals array', async () => {
+      const options: InngestModuleOptions = {
+        id: 'signals-app',
+        mode: 'connect',
+        connect: {
+          handleShutdownSignals: ['SIGTERM'], // Only handle SIGTERM
+        },
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      const mergedOptions = service.getOptions();
+
+      expect(mergedOptions.connect?.handleShutdownSignals).toEqual(['SIGTERM']);
+
+      await module.close();
+    });
+
+    it('should configure connect mode with empty handleShutdownSignals to disable auto signal handling', async () => {
+      const options: InngestModuleOptions = {
+        id: 'no-signals-app',
+        mode: 'connect',
+        connect: {
+          handleShutdownSignals: [], // Disable automatic signal handling
+        },
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [InngestModule.forRoot(options)],
+      }).compile();
+
+      const service = module.get<InngestService>(InngestService);
+      const mergedOptions = service.getOptions();
+
+      expect(mergedOptions.connect?.handleShutdownSignals).toEqual([]);
+
+      await module.close();
+    });
+  });
 });
