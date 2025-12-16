@@ -139,10 +139,21 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         run: npm install -g npm@latest
 
+      # Clear any existing auth tokens to ensure OIDC is used
+      - name: Clear npm auth for OIDC
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          # Remove any auth tokens from .npmrc to force OIDC authentication
+          sed -i '/_authToken/d' ~/.npmrc || true
+          echo "//registry.npmjs.org/:_authToken=" >> ~/.npmrc
+
       # Publish to npmjs.com using OIDC Trusted Publishing (no token needed)
       - name: Publish to npmjs
         if: github.event.inputs.dry_run != 'true'
         run: npm publish --registry https://registry.npmjs.org --access public --provenance
+        env:
+          # Explicitly unset NODE_AUTH_TOKEN to prevent token-based auth
+          NODE_AUTH_TOKEN: ''
           
       - name: Create Git tag (manual dispatch only)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
