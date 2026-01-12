@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { HealthIndicatorResult, HealthIndicatorService } from '@nestjs/terminus';
 import { InngestService } from '../services/inngest.service';
 
@@ -44,7 +44,7 @@ export class InngestHealthIndicator {
   private readonly logger = new Logger(InngestHealthIndicator.name);
 
   constructor(
-    @Optional() private readonly inngestService: InngestService | undefined,
+    private readonly inngestService: InngestService,
     private readonly healthIndicatorService: HealthIndicatorService,
   ) {}
 

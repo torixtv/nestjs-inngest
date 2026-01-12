@@ -124,36 +124,7 @@ describe('InngestHealthIndicator', () => {
     });
   });
 
-  describe('without InngestService', () => {
-    let module: TestingModule;
-    let healthIndicator: InngestHealthIndicator;
-
-    beforeEach(async () => {
-      module = await Test.createTestingModule({
-        imports: [TerminusModule],
-      }).compile();
-
-      const healthIndicatorService = module.get<HealthIndicatorService>(
-        HealthIndicatorService,
-      );
-
-      // Create InngestHealthIndicator without InngestService (undefined)
-      healthIndicator = new InngestHealthIndicator(
-        undefined,
-        healthIndicatorService,
-      );
-    });
-
-    afterEach(async () => {
-      await module.close();
-    });
-
-    it('should return down when InngestService is not available', async () => {
-      const result = await healthIndicator.isHealthy('inngest');
-
-      expect(result).toHaveProperty('inngest');
-      expect(result.inngest.status).toBe('down');
-      expect(result.inngest.message).toBe('InngestService not available');
-    });
-  });
+  // Note: InngestService is now a required dependency (not optional).
+  // Tests for undefined InngestService have been removed since this scenario
+  // is no longer possible - NestJS will fail during DI if InngestService is unavailable.
 });
