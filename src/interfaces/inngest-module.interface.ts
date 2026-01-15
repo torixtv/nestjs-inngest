@@ -26,6 +26,17 @@ export interface InngestConnectOptions {
   instanceId?: string;
 
   /**
+   * Maximum number of concurrent requests the worker will handle.
+   * If undefined, there is no limit on concurrent requests.
+   * Useful for rate limiting and resource management.
+   *
+   * @since inngest v3.45.1
+   */
+  maxWorkerConcurrency?: number;
+
+  /**
+   * @deprecated Use `maxWorkerConcurrency` instead. This option will be removed in a future version.
+   *
    * Maximum concurrent function steps this worker can handle.
    * Helps with load distribution and preventing worker overload.
    */

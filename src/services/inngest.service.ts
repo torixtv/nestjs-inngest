@@ -28,6 +28,9 @@ interface WorkerConnection {
 // Dynamic import holder for connect module
 let connectModule: typeof import('inngest/connect') | null = null;
 
+// ConnectionState enum will be loaded dynamically with the connect module
+let ConnectionStateEnum: typeof import('inngest/connect').ConnectionState | null = null;
+
 @Injectable()
 export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(InngestService.name);
@@ -164,17 +167,21 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         }
       }
 
-      const { connect } = connectModule;
+      const { connect, ConnectionState } = connectModule;
+      // Store ConnectionState enum for use in health checks
+      ConnectionStateEnum = ConnectionState;
       const connectOptions = this.options.connect || {};
 
       this.logger.log('Establishing Inngest worker connection', {
         instanceId: connectOptions.instanceId,
-        maxConcurrency: connectOptions.maxConcurrency,
+        maxWorkerConcurrency: connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency,
         handleShutdownSignals: connectOptions.handleShutdownSignals ?? 'default',
         functionCount: this.functions.length,
       });
 
       // Build connect options, only including defined values
+      // Use maxWorkerConcurrency (SDK v3.45.1+), with fallback to deprecated maxConcurrency
+      const workerConcurrency = connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
       const connectConfig = {
         apps: [
           {
@@ -185,8 +192,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         ...(connectOptions.instanceId !== undefined && {
           instanceId: connectOptions.instanceId,
         }),
-        ...(connectOptions.maxConcurrency !== undefined && {
-          maxConcurrency: connectOptions.maxConcurrency,
+        ...(workerConcurrency !== undefined && {
+          maxWorkerConcurrency: workerConcurrency,
         }),
         ...(connectOptions.handleShutdownSignals !== undefined && {
           handleShutdownSignals: connectOptions.handleShutdownSignals,
@@ -635,7 +642,9 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     if (this.options.mode !== 'connect') {
       return false;
     }
-    return this.workerConnection?.state === 'ACTIVE';
+    // Use ConnectionState enum when available for type safety
+    const activeState = ConnectionStateEnum?.ACTIVE ?? 'ACTIVE';
+    return this.workerConnection?.state === activeState;
   }
 
   /**
@@ -654,6 +663,18 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * Falls back gracefully to state-only check if SDK internals are inaccessible
    * (e.g., if SDK internal structure changes in a future version).
    *
+   * ## SDK Compatibility
+   * Tested and compatible with inngest SDK v3.40.2 - v3.49.1.
+   *
+   * Internal properties accessed (not part of public API):
+   * - `workerConnection.currentConnection` - Active connection wrapper
+   * - `currentConnection.ws.readyState` - Node.js WebSocket state (0-3)
+   * - `currentConnection.pendingHeartbeats` - Missed heartbeat counter
+   *
+   * If SDK internals change in future versions, this method falls back
+   * gracefully to state-only checking with `usingInternalCheck: false`.
+   *
+   * @see https://github.com/inngest/inngest-js/blob/v3.49.1/packages/inngest/src/components/connect/index.ts
    * @returns ConnectionHealthInfo with detailed health status
    */
   getConnectionHealth(): ConnectionHealthInfo {
@@ -672,6 +693,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     }
 
     const sdkState = this.workerConnection?.state ?? 'CLOSED';
+    // Use ConnectionState enum when available for type-safe comparisons
+    const activeState = ConnectionStateEnum?.ACTIVE ?? 'ACTIVE';
 
     // Try to get connection ID safely (getter throws if currentConnection is null)
     let connectionId: string | null = null;
@@ -709,7 +732,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
 
       // If wsReadyState is not accessible, fall back to state-only mode
       if (typeof wsReadyState !== 'number') {
-        const isHealthy = sdkState === 'ACTIVE';
+        const isHealthy = sdkState === activeState;
         return {
           isHealthy,
           reason: isHealthy
@@ -756,7 +779,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       }
 
       // Check 4: SDK state should be ACTIVE for healthy connection
-      if (sdkState !== 'ACTIVE') {
+      if (sdkState !== activeState) {
         return {
           isHealthy: false,
           reason: `Connection state is ${sdkState}`,
@@ -793,7 +816,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         );
       }
 
-      const isHealthy = sdkState === 'ACTIVE';
+      const isHealthy = sdkState === activeState;
       return {
         isHealthy,
         reason: isHealthy
