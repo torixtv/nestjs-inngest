@@ -43,6 +43,9 @@ export {
   // Connection mode types
   InngestConnectionMode,
   InngestConnectOptions,
+  // Connection health types
+  ConnectionHealthInfo,
+  WebSocketReadyState,
 } from './interfaces';
 
 // Configuration validation exports

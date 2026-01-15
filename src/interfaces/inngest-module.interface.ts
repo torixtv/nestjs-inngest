@@ -280,3 +280,89 @@ export interface InngestModuleAsyncOptions extends Pick<ModuleMetadata, 'imports
 export interface InngestOptionsFactory {
   createInngestOptions(): Promise<InngestModuleOptions> | InngestModuleOptions;
 }
+
+/**
+ * WebSocket ready state constants
+ * Matches the W3C WebSocket API readyState values
+ */
+export enum WebSocketReadyState {
+  CONNECTING = 0,
+  OPEN = 1,
+  CLOSING = 2,
+  CLOSED = 3,
+}
+
+/**
+ * Detailed connection health information for connect mode.
+ * Uses SDK internals for accurate health reporting when available.
+ *
+ * This interface provides insight into the actual WebSocket connection state,
+ * which may differ from the SDK's public `state` property in edge cases
+ * where the SDK's heartbeat mechanism fails to detect a dead connection.
+ */
+export interface ConnectionHealthInfo {
+  /**
+   * Whether the connection is truly healthy.
+   * Based on internal checks (WebSocket state, heartbeats) when available,
+   * falls back to SDK state if internals are inaccessible.
+   */
+  isHealthy: boolean;
+
+  /**
+   * Human-readable reason for the health status.
+   * Examples:
+   * - "Connection is active and healthy"
+   * - "WebSocket is CLOSED (expected OPEN)"
+   * - "Heartbeat failure (2 consecutive heartbeats missed)"
+   */
+  reason: string;
+
+  /**
+   * SDK's public state property.
+   * Note: This may be stale in edge cases - use isHealthy for reliable status.
+   * Possible values: 'CONNECTING', 'ACTIVE', 'PAUSED', 'RECONNECTING', 'CLOSING', 'CLOSED'
+   */
+  sdkState: string;
+
+  /**
+   * Actual WebSocket readyState from Node.js WebSocket implementation.
+   * This cannot be faked and reflects true TCP connection state.
+   * - 0 = CONNECTING
+   * - 1 = OPEN (healthy)
+   * - 2 = CLOSING
+   * - 3 = CLOSED
+   * Null if internal check is unavailable.
+   */
+  wsReadyState: number | null;
+
+  /**
+   * WebSocket state as human-readable string.
+   * One of: 'CONNECTING', 'OPEN', 'CLOSING', 'CLOSED', or null.
+   */
+  wsStateName: string | null;
+
+  /**
+   * Number of consecutive heartbeats that haven't received a response.
+   * - 0-1: Normal operation
+   * - ≥2: Should trigger reconnection (indicates unhealthy connection)
+   * Null if internal check is unavailable.
+   */
+  pendingHeartbeats: number | null;
+
+  /**
+   * Connection ID from the SDK.
+   * Useful for correlating with Inngest dashboard.
+   * Null if not connected or unavailable.
+   */
+  connectionId: string | null;
+
+  /**
+   * Whether the internal check was successfully performed.
+   * - true: Health is determined using WebSocket state and heartbeat info
+   * - false: Fell back to SDK state only (less reliable)
+   *
+   * If false, the health check is less reliable and may miss stale connections.
+   * This can happen if the SDK internal structure changes in a future version.
+   */
+  usingInternalCheck: boolean;
+}
