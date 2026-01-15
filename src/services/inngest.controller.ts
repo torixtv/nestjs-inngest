@@ -36,15 +36,19 @@ export function createInngestController(path: string = 'inngest') {
       };
 
       // Build serveHost URL if needed (matching the logic in inngest.service.ts)
+      // Use URL class to normalize (strips default ports like :80 for HTTP, :443 for HTTPS)
       if (options.serveHost) {
+        let baseUrl: string;
         if (options.serveHost.startsWith('http://') || options.serveHost.startsWith('https://')) {
-          // serveHost is a full URL, use it directly
-          serveOptions.serveHost = options.serveHost;
+          // serveHost is a full URL
+          baseUrl = options.serveHost;
         } else {
           // serveHost is just hostname, construct URL with port
           const port = options.servePort || process.env.PORT || 3000;
-          serveOptions.serveHost = `http://${options.serveHost}:${port}`;
+          baseUrl = `http://${options.serveHost}:${port}`;
         }
+        // Normalize URL (strips default ports like :80 for HTTP, :443 for HTTPS)
+        serveOptions.serveHost = new URL(baseUrl).origin;
       }
 
       // Only pass servePath if path is configured

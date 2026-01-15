@@ -293,13 +293,16 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       const host = overrides?.serveHost ?? this.options.serveHost ?? 'localhost';
 
       // Handle serveHost as either full URL or hostname
+      // Use URL class to normalize (strips default ports like :80 for HTTP, :443 for HTTPS)
+      const path = this.options.path || '/api/inngest';
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
       let appUrl: string;
       if (host.startsWith('http://') || host.startsWith('https://')) {
-        // serveHost is a full URL, use it directly
-        appUrl = `${host}/api/inngest`;
+        // serveHost is a full URL, normalize it
+        appUrl = new URL(normalizedPath, host).href;
       } else {
-        // serveHost is just hostname, construct URL with port
-        appUrl = `http://${host}:${port}/api/inngest`;
+        // serveHost is just hostname, construct URL with port and normalize
+        appUrl = new URL(`http://${host}:${port}${normalizedPath}`).href;
       }
 
       const devServerUrl = this.options.baseUrl;
