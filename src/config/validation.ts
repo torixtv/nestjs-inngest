@@ -30,6 +30,10 @@ export const InngestConfigSchema = z.object({
   signingKey: z.string().optional(),
   logger: z.any().optional(),
 
+  // Disable auto-registration with Inngest dev server
+  // When true, you must call registerWithDevServer() manually or rely on sdkUrl polling
+  disableAutoRegistration: z.boolean().default(false),
+
   // Connection mode
   mode: z.enum(['serve', 'connect']).default('serve'),
   connect: ConnectOptionsSchema,
