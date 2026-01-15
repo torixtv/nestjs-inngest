@@ -9,7 +9,11 @@ import {
 } from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
-import { InngestModuleOptions } from '../interfaces';
+import {
+  InngestModuleOptions,
+  ConnectionHealthInfo,
+  WebSocketReadyState,
+} from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
 import * as otelApi from '@opentelemetry/api';
 
@@ -24,6 +28,9 @@ interface WorkerConnection {
 // Dynamic import holder for connect module
 let connectModule: typeof import('inngest/connect') | null = null;
 
+// ConnectionState enum will be loaded dynamically with the connect module
+let ConnectionStateEnum: typeof import('inngest/connect').ConnectionState | null = null;
+
 @Injectable()
 export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(InngestService.name);
@@ -31,6 +38,11 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   private functions: InngestFunction<any, any, any>[] = [];
   private workerConnection: WorkerConnection | null = null;
   private isShuttingDown = false;
+  /** Guard flag to prevent log spam when SDK internals are inaccessible */
+  private hasLoggedInternalCheckWarning = false;
+
+  /** WebSocket ready state names for human-readable output */
+  private static readonly WS_STATE_NAMES = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
 
   constructor(
     @Inject(INNGEST_MODULE_OPTIONS)
@@ -155,17 +167,21 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         }
       }
 
-      const { connect } = connectModule;
+      const { connect, ConnectionState } = connectModule;
+      // Store ConnectionState enum for use in health checks
+      ConnectionStateEnum = ConnectionState;
       const connectOptions = this.options.connect || {};
 
       this.logger.log('Establishing Inngest worker connection', {
         instanceId: connectOptions.instanceId,
-        maxConcurrency: connectOptions.maxConcurrency,
+        maxWorkerConcurrency: connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency,
         handleShutdownSignals: connectOptions.handleShutdownSignals ?? 'default',
         functionCount: this.functions.length,
       });
 
       // Build connect options, only including defined values
+      // Use maxWorkerConcurrency (SDK v3.45.1+), with fallback to deprecated maxConcurrency
+      const workerConcurrency = connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
       const connectConfig = {
         apps: [
           {
@@ -176,8 +192,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         ...(connectOptions.instanceId !== undefined && {
           instanceId: connectOptions.instanceId,
         }),
-        ...(connectOptions.maxConcurrency !== undefined && {
-          maxConcurrency: connectOptions.maxConcurrency,
+        ...(workerConcurrency !== undefined && {
+          maxWorkerConcurrency: workerConcurrency,
         }),
         ...(connectOptions.handleShutdownSignals !== undefined && {
           handleShutdownSignals: connectOptions.handleShutdownSignals,
@@ -626,7 +642,194 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     if (this.options.mode !== 'connect') {
       return false;
     }
-    return this.workerConnection?.state === 'ACTIVE';
+    // Use ConnectionState enum when available for type safety
+    const activeState = ConnectionStateEnum?.ACTIVE ?? 'ACTIVE';
+    return this.workerConnection?.state === activeState;
+  }
+
+  /**
+   * Get accurate connection health by inspecting SDK internals.
+   *
+   * This method accesses internal properties of the Inngest SDK that are not
+   * part of the public API. This is necessary because the SDK's public `state`
+   * property can get stuck at 'ACTIVE' even when the underlying WebSocket
+   * connection is dead (edge case where SDK's heartbeat mechanism fails).
+   *
+   * The method checks:
+   * 1. `currentConnection` - If null, connection is definitely dead
+   * 2. `currentConnection.ws.readyState` - Actual WebSocket state from Node.js
+   * 3. `currentConnection.pendingHeartbeats` - Missed heartbeat count (≥2 = failing)
+   *
+   * Falls back gracefully to state-only check if SDK internals are inaccessible
+   * (e.g., if SDK internal structure changes in a future version).
+   *
+   * ## SDK Compatibility
+   * Tested and compatible with inngest SDK v3.40.2 - v3.49.1.
+   *
+   * Internal properties accessed (not part of public API):
+   * - `workerConnection.currentConnection` - Active connection wrapper
+   * - `currentConnection.ws.readyState` - Node.js WebSocket state (0-3)
+   * - `currentConnection.pendingHeartbeats` - Missed heartbeat counter
+   *
+   * If SDK internals change in future versions, this method falls back
+   * gracefully to state-only checking with `usingInternalCheck: false`.
+   *
+   * @see https://github.com/inngest/inngest-js/blob/v3.49.1/packages/inngest/src/components/connect/index.ts
+   * @returns ConnectionHealthInfo with detailed health status
+   */
+  getConnectionHealth(): ConnectionHealthInfo {
+    // Not applicable for serve mode
+    if (this.options.mode !== 'connect') {
+      return {
+        isHealthy: true,
+        reason: 'Running in serve mode (HTTP webhooks)',
+        sdkState: 'NOT_APPLICABLE',
+        wsReadyState: null,
+        wsStateName: null,
+        pendingHeartbeats: null,
+        connectionId: null,
+        usingInternalCheck: false,
+      };
+    }
+
+    const sdkState = this.workerConnection?.state ?? 'CLOSED';
+    // Use ConnectionState enum when available for type-safe comparisons
+    const activeState = ConnectionStateEnum?.ACTIVE ?? 'ACTIVE';
+
+    // Try to get connection ID safely (getter throws if currentConnection is null)
+    let connectionId: string | null = null;
+    try {
+      connectionId = this.workerConnection?.connectionId ?? null;
+    } catch {
+      // connectionId getter throws if currentConnection is null - this is expected
+      connectionId = null;
+    }
+
+    // Try to access SDK internals for accurate health
+    try {
+      // Cast to any to access internal properties
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const conn = this.workerConnection as any;
+      const currentConnection = conn?.currentConnection;
+
+      // Check 1: If currentConnection is null/undefined, connection is dead
+      if (!currentConnection) {
+        return {
+          isHealthy: false,
+          reason: 'No active connection (currentConnection is null)',
+          sdkState,
+          wsReadyState: null,
+          wsStateName: null,
+          pendingHeartbeats: null,
+          connectionId: null,
+          usingInternalCheck: true,
+        };
+      }
+
+      // Check 2: WebSocket readyState - the ground truth
+      const ws = currentConnection.ws;
+      const wsReadyState: number | undefined = ws?.readyState;
+
+      // If wsReadyState is not accessible, fall back to state-only mode
+      if (typeof wsReadyState !== 'number') {
+        const isHealthy = sdkState === activeState;
+        return {
+          isHealthy,
+          reason: isHealthy
+            ? 'Connection appears active (WebSocket state not accessible)'
+            : `Connection state is ${sdkState} (WebSocket state not accessible)`,
+          sdkState,
+          wsReadyState: null,
+          wsStateName: null,
+          pendingHeartbeats: null,
+          connectionId: currentConnection.id ?? connectionId,
+          usingInternalCheck: false,
+        };
+      }
+
+      const wsStateName = InngestService.WS_STATE_NAMES[wsReadyState] ?? null;
+
+      if (wsReadyState !== WebSocketReadyState.OPEN) {
+        // WebSocket is not OPEN - connection is dead
+        return {
+          isHealthy: false,
+          reason: `WebSocket is ${wsStateName} (expected OPEN)`,
+          sdkState,
+          wsReadyState,
+          wsStateName,
+          pendingHeartbeats: currentConnection.pendingHeartbeats ?? null,
+          connectionId: currentConnection.id ?? connectionId,
+          usingInternalCheck: true,
+        };
+      }
+
+      // Check 3: Pending heartbeats - if ≥2, heartbeats are failing
+      const pendingHeartbeats: number | undefined = currentConnection.pendingHeartbeats;
+      if (typeof pendingHeartbeats === 'number' && pendingHeartbeats >= 2) {
+        return {
+          isHealthy: false,
+          reason: `Heartbeat failure (${pendingHeartbeats} consecutive heartbeats missed)`,
+          sdkState,
+          wsReadyState: wsReadyState ?? null,
+          wsStateName,
+          pendingHeartbeats,
+          connectionId: currentConnection.id ?? connectionId,
+          usingInternalCheck: true,
+        };
+      }
+
+      // Check 4: SDK state should be ACTIVE for healthy connection
+      if (sdkState !== activeState) {
+        return {
+          isHealthy: false,
+          reason: `Connection state is ${sdkState}`,
+          sdkState,
+          wsReadyState: wsReadyState ?? null,
+          wsStateName,
+          pendingHeartbeats: pendingHeartbeats ?? null,
+          connectionId: currentConnection.id ?? connectionId,
+          usingInternalCheck: true,
+        };
+      }
+
+      // All checks passed - connection is healthy
+      return {
+        isHealthy: true,
+        reason: 'Connection is active and healthy',
+        sdkState,
+        wsReadyState: wsReadyState ?? null,
+        wsStateName,
+        pendingHeartbeats: pendingHeartbeats ?? null,
+        connectionId: currentConnection.id ?? connectionId,
+        usingInternalCheck: true,
+      };
+    } catch (error) {
+      // Failed to access SDK internals - fall back to state-only check
+      // Log warning only once to prevent spam on frequent health checks
+      if (!this.hasLoggedInternalCheckWarning) {
+        this.hasLoggedInternalCheckWarning = true;
+        this.logger.warn(
+          'Failed to access SDK internals for health check, falling back to state-only',
+          {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          },
+        );
+      }
+
+      const isHealthy = sdkState === activeState;
+      return {
+        isHealthy,
+        reason: isHealthy
+          ? 'Connection appears active (internal check unavailable)'
+          : `Connection state is ${sdkState} (internal check unavailable)`,
+        sdkState,
+        wsReadyState: null,
+        wsStateName: null,
+        pendingHeartbeats: null,
+        connectionId,
+        usingInternalCheck: false,
+      };
+    }
   }
 
   /**

@@ -43,6 +43,9 @@ export {
   // Connection mode types
   InngestConnectionMode,
   InngestConnectOptions,
+  // Connection health types
+  ConnectionHealthInfo,
+  WebSocketReadyState,
 } from './interfaces';
 
 // Configuration validation exports
@@ -105,3 +108,7 @@ export type {
   GetStepTools,
   InngestMiddleware,
 } from 'inngest';
+
+// Re-export ConnectionState enum from inngest/connect for type-safe state comparisons
+// Available since inngest v3.44.3
+export { ConnectionState } from 'inngest/connect';

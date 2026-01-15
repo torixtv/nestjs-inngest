@@ -77,33 +77,39 @@ export class InngestHealthIndicator {
       const options = this.inngestService.getOptions();
       const mode = options.mode || 'serve';
 
-      // For connect mode, verify the WebSocket connection is active
+      // For connect mode, use getConnectionHealth() for accurate status
+      // This inspects SDK internals (WebSocket state, heartbeats) to detect
+      // stale connections that the SDK's public state property might miss
       if (mode === 'connect') {
-        const connectionState = this.inngestService.getConnectionState();
+        const health = this.inngestService.getConnectionHealth();
 
-        if (connectionState === 'ACTIVE') {
+        if (health.isHealthy) {
           return check.up({
-            message: 'Inngest worker is connected',
+            message: health.reason,
             mode: 'connect',
-            connectionState,
-          });
-        } else if (
-          connectionState === 'CONNECTING' ||
-          connectionState === 'RECONNECTING'
-        ) {
-          // Not ready yet, but not necessarily unhealthy
-          this.logger.warn(`Inngest connection state: ${connectionState}`);
-          return check.down({
-            message: `Inngest connection state: ${connectionState}`,
-            mode: 'connect',
-            connectionState,
+            connectionState: health.sdkState,
+            connectionId: health.connectionId,
+            wsReadyState: health.wsStateName,
+            pendingHeartbeats: health.pendingHeartbeats,
+            usingInternalCheck: health.usingInternalCheck,
           });
         } else {
-          this.logger.warn(`Inngest connection not active: ${connectionState}`);
+          this.logger.warn(`Inngest connection unhealthy: ${health.reason}`, {
+            sdkState: health.sdkState,
+            wsReadyState: health.wsReadyState,
+            wsStateName: health.wsStateName,
+            pendingHeartbeats: health.pendingHeartbeats,
+            connectionId: health.connectionId,
+            usingInternalCheck: health.usingInternalCheck,
+          });
           return check.down({
-            message: `Inngest connection not active: ${connectionState}`,
+            message: health.reason,
             mode: 'connect',
-            connectionState,
+            connectionState: health.sdkState,
+            connectionId: health.connectionId,
+            wsReadyState: health.wsStateName,
+            pendingHeartbeats: health.pendingHeartbeats,
+            usingInternalCheck: health.usingInternalCheck,
           });
         }
       }

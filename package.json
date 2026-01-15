@@ -1,6 +1,6 @@
 {
   "name": "@torixtv/nestjs-inngest",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Modern NestJS integration for Inngest - type-safe, decorator-based event-driven functions",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -75,6 +75,7 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
+    "inngest": "^3.49.1",
     "@nestjs/schematics": "^11.0.7",
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/terminus": "^11.0.0",
@@ -106,7 +107,7 @@
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/terminus": "^11.0.0",
     "express": "^5.1.0",
-    "inngest": "^3.40.2",
+    "inngest": "^3.49.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^3.25.76"

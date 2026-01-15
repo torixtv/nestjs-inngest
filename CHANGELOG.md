@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.0] - 2024-XX-XX
+## [0.5.0] - 2026-01-15
 
 ### Added
 
@@ -16,33 +16,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `mode: 'connect'` - Persistent WebSocket connection where your app connects to Inngest
 - **Connect Mode Options**: New `connect` configuration object with the following options:
   - `instanceId` - Unique identifier for the worker instance (auto-generated UUID if not provided)
-  - `maxConcurrency` - Maximum concurrent function executions
+  - `maxWorkerConcurrency` - Maximum concurrent requests the worker will handle (new in inngest v3.45.1)
+  - `maxConcurrency` - (deprecated) Use `maxWorkerConcurrency` instead
   - `shutdownTimeout` - Time in milliseconds to wait for graceful shutdown (default: 30000)
   - `handleShutdownSignals` - Array of process signals to handle for graceful shutdown (default: `['SIGTERM', 'SIGINT']`)
+- **Accurate Connection Health Checks**: New `getConnectionHealth()` method on `InngestService` that inspects SDK internals to detect stale connections
+  - Checks WebSocket `readyState` for actual TCP connection state
+  - Monitors `pendingHeartbeats` counter (≥2 indicates failing connection)
+  - Falls back gracefully to SDK state if internals are inaccessible
+  - Returns detailed `ConnectionHealthInfo` with diagnostic data
 - **Connection State API**: New methods on `InngestService`:
   - `getConnectionState()` - Returns current connection state (`'ACTIVE'`, `'CONNECTING'`, `'RECONNECTING'`, `'PAUSED'`, `'CLOSING'`, `'CLOSED'`, or `'NOT_APPLICABLE'` for serve mode)
   - `isConnected()` - Returns `true` only when connection state is `'ACTIVE'`
+  - `getConnectionHealth()` - Returns detailed health info including WebSocket state and heartbeat status
+- **New Type Exports**:
+  - `ConnectionHealthInfo` - Interface for detailed connection health information
+  - `WebSocketReadyState` - Enum for WebSocket ready states (CONNECTING, OPEN, CLOSING, CLOSED)
+  - `ConnectionState` - Re-exported from `inngest/connect` for type-safe state comparisons
+  - `InngestConnectionMode`, `InngestConnectOptions`, `ConnectOptionsSchema`
 - **Environment Variable Support**: `INNGEST_MODE` environment variable to configure connection mode
-- **Connection-Aware Health Checks**: Health service now reports connection state when using connect mode
 - **Graceful Shutdown**: Automatic handling of shutdown signals in connect mode with configurable timeout
-- **Type Exports**: New exports for `InngestConnectionMode`, `InngestConnectOptions`, and `ConnectOptionsSchema`
 - **@nestjs/terminus Integration**: New `InngestHealthIndicator` for use with `@nestjs/terminus` health checks
-  - `isHealthy(key)` - Check if Inngest client is healthy (connection state for connect mode)
+  - `isHealthy(key)` - Uses `getConnectionHealth()` for accurate status in connect mode
   - `isReady(key)` - Check if Inngest is ready with functions registered
   - Compatible with Kubernetes readiness/liveness probes
   - `@nestjs/terminus` is an optional peer dependency
 
 ### Changed
 
-- Health check endpoint now includes `mode` and `connectionState` fields when applicable
+- **Updated to Inngest SDK v3.49.1**: Minimum required version is now v3.49.1
+- Health check endpoint now includes detailed connection diagnostics: `wsReadyState`, `pendingHeartbeats`, `usingInternalCheck`
 - Module conditionally includes HTTP controller based on connection mode (controller only registered in serve mode)
+- `InngestHealthIndicator` now uses internal SDK inspection for reliable health status
+
+### Fixed
+
+- **Stale Connection Detection**: Health checks no longer report "ACTIVE" when WebSocket connection is actually dead
+- **Log Spam Prevention**: SDK internal access warnings are now logged only once per service instance
 
 ### Documentation
 
+- Added SDK compatibility notes to `getConnectionHealth()` JSDoc (tested with v3.40.2 - v3.49.1)
 - Added comprehensive "Connection Modes" section to README
 - Updated API Reference with new configuration options and methods
 - Added Kubernetes deployment examples for connect mode
-- Updated Configuration Options table with `mode` and `connect` options
 
 ## [0.4.3] - 2024-XX-XX
 
