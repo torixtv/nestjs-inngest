@@ -9,11 +9,7 @@ import {
 } from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
-import {
-  InngestModuleOptions,
-  ConnectionHealthInfo,
-  WebSocketReadyState,
-} from '../interfaces';
+import { InngestModuleOptions, ConnectionHealthInfo, WebSocketReadyState } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
 import * as otelApi from '@opentelemetry/api';
 
@@ -181,7 +177,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
 
       // Build connect options, only including defined values
       // Use maxWorkerConcurrency (SDK v3.45.1+), with fallback to deprecated maxConcurrency
-      const workerConcurrency = connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
+      const workerConcurrency =
+        connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
       const connectConfig = {
         apps: [
           {
@@ -711,7 +708,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // Try to access SDK internals for accurate health
     try {
       // Cast to any to access internal properties
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       const conn = this.workerConnection as any;
       const currentConnection = conn?.currentConnection;
 
