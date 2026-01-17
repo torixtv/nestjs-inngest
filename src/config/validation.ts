@@ -27,6 +27,7 @@ export const InngestConfigSchema = z.object({
   path: z.string().default('/api/inngest'),
   servePort: z.number().min(1).max(65535).optional(),
   serveHost: z.string().optional(),
+  servePath: z.string().optional(),
   signingKey: z.string().optional(),
   logger: z.any().optional(),
 
@@ -249,6 +250,11 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
   // Read serveHost from INNGEST_SERVE_HOST
   if (process.env.INNGEST_SERVE_HOST) {
     envConfig.serveHost = process.env.INNGEST_SERVE_HOST;
+  }
+
+  // Read servePath from INNGEST_SERVE_PATH
+  if (process.env.INNGEST_SERVE_PATH) {
+    envConfig.servePath = process.env.INNGEST_SERVE_PATH;
   }
 
   // Read path from INNGEST_PATH
