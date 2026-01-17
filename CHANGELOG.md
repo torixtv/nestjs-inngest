@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-18
+
+### Added
+
+- **`servePath` Configuration Option**: New option to specify a separate callback path for Inngest to use when sending events back to your application
+  - Allows decoupling the internal serve endpoint from the external callback URL
+  - Useful for scenarios with reverse proxies, API gateways, or custom routing configurations
+  - Example: `serveHost: 'https://api.example.com'`, `servePath: '/webhooks/inngest'`
+
+### Fixed
+
+- **Zod Schema Validation**: Added `disableAutoRegistration` to the Zod configuration schema
+
 ## [0.5.0] - 2026-01-15
 
 ### Added
