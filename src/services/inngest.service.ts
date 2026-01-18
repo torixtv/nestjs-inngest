@@ -449,6 +449,9 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         }
       }
 
+      // DEBUG: Test if the tracer can create spans with valid IDs
+      this.testTracerSpanCreation();
+
       // In OpenTelemetry SDK v2.x, addSpanProcessor was removed from BasicTracerProvider.
       // Span processors can only be configured at construction time via spanProcessors config.
       // However, we can access the internal MultiSpanProcessor and push our processor directly.
@@ -486,6 +489,36 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     } catch (error) {
       this.logger.warn({
         message: 'Failed to add InngestSpanProcessor',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Test if the OTel tracer can create spans with valid IDs.
+   * This helps diagnose whether the provider is properly configured.
+   */
+  private testTracerSpanCreation(): void {
+    try {
+      // Use the same tracer name/version that Inngest SDK uses
+      const tracer = otelApi.trace.getTracer('inngest', '3.49.1');
+      const span = tracer.startSpan('test-span');
+      const spanContext = span.spanContext();
+
+      this.logger.debug({
+        message: 'Tracer span creation test',
+        spanId: spanContext.spanId,
+        traceId: spanContext.traceId,
+        traceFlags: spanContext.traceFlags,
+        isValidSpanId: spanContext.spanId !== '0000000000000000',
+        isValidTraceId: spanContext.traceId !== '00000000000000000000000000000000',
+        tracerName: 'inngest',
+      });
+
+      span.end();
+    } catch (error) {
+      this.logger.warn({
+        message: 'Failed to test tracer span creation',
         error: error instanceof Error ? error.message : String(error),
       });
     }

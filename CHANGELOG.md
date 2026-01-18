@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.7] - 2026-01-18
+
+### Added
+
+- **Tracing Debug**: Added `testTracerSpanCreation()` diagnostic to verify OTel tracer is producing valid span IDs
+  - Tests span creation using same tracer name ("inngest") that SDK uses
+  - Logs whether spanId/traceId are valid or null (`0000000000000000`)
+  - Helps diagnose if NodeSDK is properly initialized before InngestModule
+
 ## [0.11.6] - 2026-01-18
 
 ### Fixed
