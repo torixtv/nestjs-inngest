@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-01-18
+
+### Changed
+
+- **Tracing**: Simplified tracing implementation - now uses `behaviour: 'extendProvider'`
+  - The root cause of tracing issues was `/api/inngest` being excluded from OTel HTTP instrumentation in `@torixtv/nestjs-utils`
+  - With route exclusion fixed in `@torixtv/nestjs-utils@1.2.13`, `extendProvider` works correctly
+  - SDK now handles all tracing automatically - no manual span processor management needed
+
+### Removed
+
+- **Removed debug methods**: `testTracerSpanCreation()`, `verifyInngestProcessorRegistration()`
+- **Removed manual processor management**: `addInngestSpanProcessor()` - SDK handles this via `extendProvider`
+- **Simplified `InngestTracingService`**: Removed deprecated `createTracingMiddleware()` and manual span creation methods
+  - Service now only handles trace context propagation (get/inject/extract)
+  - Actual tracing is fully handled by SDK's `extendedTracesMiddleware`
+
+### Technical Notes
+
+The tracing now works simply:
+1. HTTP instrumentation processes `/api/inngest` requests (no longer excluded)
+2. `traceparent` header from Inngest Cloud is propagated into OTel context
+3. SDK's `extendedTracesMiddleware` with `behaviour: 'extendProvider'` creates spans
+4. Spans are exported to both Grafana/Tempo and Inngest Dashboard
+
+**Breaking Change**: Requires `@torixtv/nestjs-utils@1.2.13` or later.
+
 ## [0.11.8] - 2026-01-18
 
 ### Changed

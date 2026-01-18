@@ -8,11 +8,10 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
-import { extendedTracesMiddleware, InngestSpanProcessor } from 'inngest/experimental';
+import { extendedTracesMiddleware } from 'inngest/experimental';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
 import { InngestModuleOptions, ConnectionHealthInfo, WebSocketReadyState } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
-import * as otelApi from '@opentelemetry/api';
 
 // Type for the WorkerConnection returned by connect()
 interface WorkerConnection {
@@ -53,29 +52,16 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // This middleware:
     // - Uses startActiveSpan() for proper context propagation (Pino log correlation)
     // - Handles trace context propagation correctly
-    // - Calls declareStartingSpan() with proper span context for Inngest dashboard traces
-    //
-    // We use behaviour: 'off' because:
-    // - 'extendProvider' fails with ProxyTracerProvider (no addSpanProcessor method)
-    // - 'createProvider' REPLACES the existing OTel provider, breaking Grafana/Tempo tracing
-    // - 'auto' tries extendProvider, then falls back to createProvider (same problem)
-    //
-    // With 'off', the middleware still:
-    // - Provides the tracer via ctx.tracer for step instrumentation
+    // - Registers InngestSpanProcessor in clientProcessorMap for Inngest dashboard traces
     // - Calls forceFlush() after function execution
-    //
-    // We manually add InngestSpanProcessor via addInngestSpanProcessor() to:
-    // - Push our processor to the existing OTel provider's processor list
-    // - The processor constructor auto-registers in clientProcessorMap
-    // - This allows declareStartingSpan() to find and use our processor
     try {
       const sdkTracingMiddleware = extendedTracesMiddleware({
-        behaviour: 'off',
+        behaviour: 'extendProvider',
       });
       middleware.push(sdkTracingMiddleware as any);
       this.logger.debug({
         message: 'Added SDK extendedTracesMiddleware for OpenTelemetry integration',
-        behaviour: 'off',
+        behaviour: 'extendProvider',
       });
     } catch (error) {
       this.logger.warn({
@@ -92,9 +78,6 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       logger: this.options.logger,
       ...this.options.clientOptions,
     });
-
-    // Add InngestSpanProcessor to the OpenTelemetry provider for Inngest dashboard traces
-    this.addInngestSpanProcessor();
 
     this.logger.log({
       message: 'Inngest client created successfully',
@@ -419,165 +402,6 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     }
 
     return sources.join(',');
-  }
-
-  /**
-   * Add InngestSpanProcessor to the OpenTelemetry provider for Inngest dashboard traces.
-   *
-   * This handles two challenges:
-   * 1. The Inngest SDK's `extendProvider` doesn't handle OpenTelemetry's ProxyTracerProvider
-   * 2. In OpenTelemetry SDK v2.x, `addSpanProcessor` was removed from BasicTracerProvider
-   *
-   * Solution: Access the internal MultiSpanProcessor and push our processor directly
-   * to the `_spanProcessors` array. This works because NodeSDK uses MultiSpanProcessor
-   * internally to manage all configured span processors.
-   *
-   * @see https://opentelemetry.io/docs/languages/js/getting-started/nodejs/
-   */
-  private addInngestSpanProcessor(): void {
-    try {
-      const globalProvider = otelApi.trace.getTracerProvider();
-
-      // The OpenTelemetry API uses a proxy pattern. The actual provider
-      // is accessible via getDelegate().
-      let targetProvider: any = globalProvider;
-
-      if ('getDelegate' in globalProvider) {
-        const delegate = (globalProvider as any).getDelegate();
-        if (delegate) {
-          targetProvider = delegate;
-        }
-      }
-
-      // DEBUG: Test if the tracer can create spans with valid IDs
-      this.testTracerSpanCreation();
-
-      // In OpenTelemetry SDK v2.x, addSpanProcessor was removed from BasicTracerProvider.
-      // Span processors can only be configured at construction time via spanProcessors config.
-      // However, we can access the internal MultiSpanProcessor and push our processor directly.
-      const activeProcessor = targetProvider._activeSpanProcessor;
-      if (activeProcessor?._spanProcessors && Array.isArray(activeProcessor._spanProcessors)) {
-        const processor = new InngestSpanProcessor(this.inngestClient);
-        activeProcessor._spanProcessors.push(processor);
-        this.logger.debug({
-          message: 'Added InngestSpanProcessor for Inngest dashboard traces',
-          providerType: targetProvider.constructor?.name || 'unknown',
-          totalProcessors: activeProcessor._spanProcessors.length,
-          clientId: this.inngestClient?.id,
-        });
-
-        // Verify registration in clientProcessorMap (debugging trace export issues)
-        this.verifyInngestProcessorRegistration();
-      } else if (typeof targetProvider.addSpanProcessor === 'function') {
-        // Fallback for older SDK versions that still have addSpanProcessor
-        const processor = new InngestSpanProcessor(this.inngestClient);
-        targetProvider.addSpanProcessor(processor);
-        this.logger.debug({
-          message: 'Added InngestSpanProcessor via legacy addSpanProcessor method',
-          providerType: targetProvider.constructor?.name || 'unknown',
-          clientId: this.inngestClient?.id,
-        });
-
-        // Verify registration in clientProcessorMap (debugging trace export issues)
-        this.verifyInngestProcessorRegistration();
-      } else {
-        this.logger.warn({
-          message: 'Could not add InngestSpanProcessor - no compatible method found on provider',
-          providerType: targetProvider.constructor?.name || 'unknown',
-        });
-      }
-    } catch (error) {
-      this.logger.warn({
-        message: 'Failed to add InngestSpanProcessor',
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * Test if the OTel tracer can create spans with valid IDs.
-   * This helps diagnose whether the provider is properly configured.
-   *
-   * Tests both startSpan() and startActiveSpan() since they may behave differently
-   * with ParentBasedSampler when there's no parent context.
-   */
-  private testTracerSpanCreation(): void {
-    try {
-      // Use the same tracer name/version that Inngest SDK uses
-      const tracer = otelApi.trace.getTracer('inngest', '3.49.1');
-
-      // Test 1: startSpan (what we tested before)
-      const span1 = tracer.startSpan('test-span-startSpan');
-      const ctx1 = span1.spanContext();
-      this.logger.debug({
-        message: 'Tracer test: startSpan()',
-        spanId: ctx1.spanId,
-        traceId: ctx1.traceId,
-        traceFlags: ctx1.traceFlags,
-        isValidSpanId: ctx1.spanId !== '0000000000000000',
-        isRecording: span1.isRecording(),
-      });
-      span1.end();
-
-      // Test 2: startActiveSpan (what Inngest SDK uses in v2.js:70)
-      tracer.startActiveSpan('test-span-startActiveSpan', (span2) => {
-        const ctx2 = span2.spanContext();
-        this.logger.debug({
-          message: 'Tracer test: startActiveSpan()',
-          spanId: ctx2.spanId,
-          traceId: ctx2.traceId,
-          traceFlags: ctx2.traceFlags,
-          isValidSpanId: ctx2.spanId !== '0000000000000000',
-          isRecording: span2.isRecording(),
-        });
-        span2.end();
-      });
-
-      // Test 3: Check sampling ratio from env
-      this.logger.debug({
-        message: 'Sampling configuration',
-        OTEL_SAMPLING_RATIO: process.env.OTEL_SAMPLING_RATIO || '(not set, defaults to 1.0)',
-      });
-    } catch (error) {
-      this.logger.warn({
-        message: 'Failed to test tracer span creation',
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * Verify that InngestSpanProcessor is registered in the clientProcessorMap.
-   *
-   * This is a diagnostic method to help debug tracing issues. The InngestSpanProcessor
-   * constructor automatically registers itself in clientProcessorMap when created with
-   * a client instance. The execution code looks up the processor from this map to call
-   * declareStartingSpan().
-   *
-   * Enable DEBUG=inngest:otel:* for additional SDK-level trace logging.
-   */
-  private verifyInngestProcessorRegistration(): void {
-    import('inngest/components/execution/otel/access')
-      .then(({ clientProcessorMap }) => {
-        // Cast to any to bypass SDK internal type mismatch (WeakMap<Any, ...>)
-        const registered = clientProcessorMap.get(this.inngestClient as any);
-        this.logger.debug({
-          message: 'InngestSpanProcessor registration verification',
-          isRegistered: !!registered,
-          processorType: registered?.constructor?.name || null,
-          clientId: this.inngestClient?.id,
-          hint: registered
-            ? 'Processor is registered. Enable DEBUG=inngest:otel:* for SDK logs.'
-            : 'Processor NOT registered - client reference mismatch?',
-        });
-      })
-      .catch((e) => {
-        this.logger.debug({
-          message: 'Could not verify clientProcessorMap registration',
-          error: e instanceof Error ? e.message : String(e),
-          hint: 'inngest/components/execution/otel/access may not be available in this SDK version',
-        });
-      });
   }
 
   /**
