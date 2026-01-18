@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Reverted `behaviour: 'auto'` back to `behaviour: 'off'` to preserve Grafana/Tempo tracing
+  - `behaviour: 'auto'` fell back to `createProvider` which **replaced** the existing OTel provider
+  - This broke Grafana/Tempo tracing since the new provider didn't have the OTLP exporter
+  - Root cause: `extendProvider` fails with ProxyTracerProvider (no `addSpanProcessor` method)
+  - With `behaviour: 'off'`, we manually add `InngestSpanProcessor` to the existing provider
+  - The processor constructor auto-registers in `clientProcessorMap` for `declareStartingSpan()`
+
+### Technical Notes
+
+The Inngest SDK's tracing middleware has three behaviours:
+- `'extendProvider'`: Fails with NodeSDK's ProxyTracerProvider pattern
+- `'createProvider'`: Runs `trace.setGlobalTracerProvider()` - **replaces** existing provider
+- `'auto'`: Tries extend, falls back to create (same problem as create)
+
+Our solution uses `'off'` + manual processor addition to preserve the existing OTel setup.
+
 ## [0.11.5] - 2026-01-18
 
 ### Fixed

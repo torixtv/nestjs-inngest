@@ -55,21 +55,27 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // - Handles trace context propagation correctly
     // - Calls declareStartingSpan() with proper span context for Inngest dashboard traces
     //
-    // We use behaviour: 'auto' which will:
-    // 1. Try to extend the existing OpenTelemetry provider (via ProxyTracerProvider.getDelegate())
-    // 2. If that fails, create a new provider
-    // 3. Either way, it creates proper spans that get passed to InngestSpanProcessor
+    // We use behaviour: 'off' because:
+    // - 'extendProvider' fails with ProxyTracerProvider (no addSpanProcessor method)
+    // - 'createProvider' REPLACES the existing OTel provider, breaking Grafana/Tempo tracing
+    // - 'auto' tries extendProvider, then falls back to createProvider (same problem)
     //
-    // Note: We still manually add InngestSpanProcessor via addInngestSpanProcessor() to ensure
-    // it's registered even if extendProvider path fails due to ProxyTracerProvider issues.
+    // With 'off', the middleware still:
+    // - Provides the tracer via ctx.tracer for step instrumentation
+    // - Calls forceFlush() after function execution
+    //
+    // We manually add InngestSpanProcessor via addInngestSpanProcessor() to:
+    // - Push our processor to the existing OTel provider's processor list
+    // - The processor constructor auto-registers in clientProcessorMap
+    // - This allows declareStartingSpan() to find and use our processor
     try {
       const sdkTracingMiddleware = extendedTracesMiddleware({
-        behaviour: 'auto',
+        behaviour: 'off',
       });
       middleware.push(sdkTracingMiddleware as any);
       this.logger.debug({
         message: 'Added SDK extendedTracesMiddleware for OpenTelemetry integration',
-        behaviour: 'auto',
+        behaviour: 'off',
       });
     } catch (error) {
       this.logger.warn({
