@@ -8,7 +8,8 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
-import { extendedTracesMiddleware } from 'inngest/experimental';
+import { extendedTracesMiddleware, InngestSpanProcessor } from 'inngest/experimental';
+import * as otelApi from '@opentelemetry/api';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
 import { InngestModuleOptions, ConnectionHealthInfo, WebSocketReadyState } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
@@ -52,16 +53,20 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // This middleware:
     // - Uses startActiveSpan() for proper context propagation (Pino log correlation)
     // - Handles trace context propagation correctly
-    // - Registers InngestSpanProcessor in clientProcessorMap for Inngest dashboard traces
-    // - Calls forceFlush() after function execution
+    // - Provides ctx.tracer for step instrumentation
+    //
+    // NOTE: We use 'off' behaviour because:
+    // - 'extendProvider' fails with NodeSDK's ProxyTracerProvider (no addSpanProcessor method)
+    // - 'createProvider' REPLACES our existing OTel provider, breaking Grafana/Tempo tracing
+    // - We manually add InngestSpanProcessor after client creation instead
     try {
       const sdkTracingMiddleware = extendedTracesMiddleware({
-        behaviour: 'extendProvider',
+        behaviour: 'off',
       });
       middleware.push(sdkTracingMiddleware as any);
       this.logger.debug({
         message: 'Added SDK extendedTracesMiddleware for OpenTelemetry integration',
-        behaviour: 'extendProvider',
+        behaviour: 'off',
       });
     } catch (error) {
       this.logger.warn({
@@ -78,6 +83,11 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       logger: this.options.logger,
       ...this.options.clientOptions,
     });
+
+    // Add InngestSpanProcessor for Inngest dashboard traces
+    // This must be done after client creation since the processor constructor
+    // registers itself in clientProcessorMap using the client reference
+    this.addInngestSpanProcessor();
 
     this.logger.log({
       message: 'Inngest client created successfully',
@@ -402,6 +412,63 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     }
 
     return sources.join(',');
+  }
+
+  /**
+   * Manually add InngestSpanProcessor to the OTel provider.
+   *
+   * Required because:
+   * - extendProvider fails with NodeSDK's ProxyTracerProvider (no addSpanProcessor method)
+   * - createProvider REPLACES our existing OTel provider, breaking Grafana/Tempo tracing
+   * - The processor constructor auto-registers in clientProcessorMap for Inngest SDK to use
+   *
+   * This accesses internal OTel APIs (_activeSpanProcessor._spanProcessors) which is
+   * not ideal but is the only way to:
+   * 1. Keep our existing OTel provider (for Grafana/Tempo export)
+   * 2. Add InngestSpanProcessor (for Inngest Dashboard export)
+   */
+  private addInngestSpanProcessor(): void {
+    try {
+      const globalProvider = otelApi.trace.getTracerProvider();
+      let targetProvider: any = globalProvider;
+
+      // The OTel API uses a proxy pattern - get the delegate (NodeTracerProvider)
+      if ('getDelegate' in globalProvider) {
+        const delegate = (globalProvider as any).getDelegate();
+        if (delegate) {
+          targetProvider = delegate;
+        }
+      }
+
+      // Access internal MultiSpanProcessor and add our processor
+      const activeProcessor = targetProvider._activeSpanProcessor;
+      if (activeProcessor?._spanProcessors && Array.isArray(activeProcessor._spanProcessors)) {
+        // Create processor - constructor auto-registers in clientProcessorMap
+        const processor = new InngestSpanProcessor(this.inngestClient);
+        activeProcessor._spanProcessors.push(processor);
+        this.logger.log({
+          message: 'Added InngestSpanProcessor to OTel provider',
+          processorCount: activeProcessor._spanProcessors.length,
+        });
+      } else if (typeof targetProvider.addSpanProcessor === 'function') {
+        // Fallback for providers that expose addSpanProcessor directly
+        const processor = new InngestSpanProcessor(this.inngestClient);
+        targetProvider.addSpanProcessor(processor);
+        this.logger.log({
+          message: 'Added InngestSpanProcessor via addSpanProcessor()',
+        });
+      } else {
+        this.logger.warn({
+          message: 'Could not add InngestSpanProcessor - no compatible method found',
+          providerType: targetProvider?.constructor?.name,
+        });
+      }
+    } catch (error) {
+      this.logger.warn({
+        message: 'Failed to add InngestSpanProcessor',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
