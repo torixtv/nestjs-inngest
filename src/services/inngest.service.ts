@@ -447,7 +447,11 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
           message: 'Added InngestSpanProcessor for Inngest dashboard traces',
           providerType: targetProvider.constructor?.name || 'unknown',
           totalProcessors: activeProcessor._spanProcessors.length,
+          clientId: this.inngestClient?.id,
         });
+
+        // Verify registration in clientProcessorMap (debugging trace export issues)
+        this.verifyInngestProcessorRegistration();
       } else if (typeof targetProvider.addSpanProcessor === 'function') {
         // Fallback for older SDK versions that still have addSpanProcessor
         const processor = new InngestSpanProcessor(this.inngestClient);
@@ -455,7 +459,11 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         this.logger.debug({
           message: 'Added InngestSpanProcessor via legacy addSpanProcessor method',
           providerType: targetProvider.constructor?.name || 'unknown',
+          clientId: this.inngestClient?.id,
         });
+
+        // Verify registration in clientProcessorMap (debugging trace export issues)
+        this.verifyInngestProcessorRegistration();
       } else {
         this.logger.warn({
           message: 'Could not add InngestSpanProcessor - no compatible method found on provider',
@@ -468,6 +476,40 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Verify that InngestSpanProcessor is registered in the clientProcessorMap.
+   *
+   * This is a diagnostic method to help debug tracing issues. The InngestSpanProcessor
+   * constructor automatically registers itself in clientProcessorMap when created with
+   * a client instance. The execution code looks up the processor from this map to call
+   * declareStartingSpan().
+   *
+   * Enable DEBUG=inngest:otel:* for additional SDK-level trace logging.
+   */
+  private verifyInngestProcessorRegistration(): void {
+    import('inngest/components/execution/otel/access')
+      .then(({ clientProcessorMap }) => {
+        // Cast to any to bypass SDK internal type mismatch (WeakMap<Any, ...>)
+        const registered = clientProcessorMap.get(this.inngestClient as any);
+        this.logger.debug({
+          message: 'InngestSpanProcessor registration verification',
+          isRegistered: !!registered,
+          processorType: registered?.constructor?.name || null,
+          clientId: this.inngestClient?.id,
+          hint: registered
+            ? 'Processor is registered. Enable DEBUG=inngest:otel:* for SDK logs.'
+            : 'Processor NOT registered - client reference mismatch?',
+        });
+      })
+      .catch((e) => {
+        this.logger.debug({
+          message: 'Could not verify clientProcessorMap registration',
+          error: e instanceof Error ? e.message : String(e),
+          hint: 'inngest/components/execution/otel/access may not be available in this SDK version',
+        });
+      });
   }
 
   /**

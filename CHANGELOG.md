@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-01-18
+
+### Added
+
+- **Tracing Debug Logging**: Added detailed logging to diagnose Inngest dashboard tracing issues
+  - Logs InngestSpanProcessor registration verification with `clientProcessorMap`
+  - Helps identify if `traceparent` header is missing from Inngest requests
+  - Enable `DEBUG=inngest:otel:*` environment variable for additional SDK-level trace logging
+
 ## [0.11.3] - 2026-01-18
 
 ### Fixed
