@@ -9,10 +9,10 @@ import {
 } from '@nestjs/common';
 import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
 import { extendedTracesMiddleware, InngestSpanProcessor } from 'inngest/experimental';
-import * as otelApi from '@opentelemetry/api';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
 import { InngestModuleOptions, ConnectionHealthInfo, WebSocketReadyState } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
+import * as otelApi from '@opentelemetry/api';
 
 // Type for the WorkerConnection returned by connect()
 interface WorkerConnection {
@@ -53,20 +53,16 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // This middleware:
     // - Uses startActiveSpan() for proper context propagation (Pino log correlation)
     // - Handles trace context propagation correctly
-    // - Provides ctx.tracer for step instrumentation
-    //
-    // NOTE: We use 'off' behaviour because:
-    // - 'extendProvider' fails with NodeSDK's ProxyTracerProvider (no addSpanProcessor method)
-    // - 'createProvider' REPLACES our existing OTel provider, breaking Grafana/Tempo tracing
-    // - We manually add InngestSpanProcessor after client creation instead
+    // Note: We use behaviour: 'off' because we manually add the InngestSpanProcessor
+    // after client creation. This is needed because the Inngest SDK's extendProvider
+    // doesn't handle OpenTelemetry's ProxyTracerProvider pattern.
     try {
       const sdkTracingMiddleware = extendedTracesMiddleware({
-        behaviour: 'off',
+        behaviour: 'off', // We manually add the processor via addInngestSpanProcessor()
       });
       middleware.push(sdkTracingMiddleware as any);
       this.logger.debug({
         message: 'Added SDK extendedTracesMiddleware for OpenTelemetry integration',
-        behaviour: 'off',
       });
     } catch (error) {
       this.logger.warn({
@@ -84,9 +80,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       ...this.options.clientOptions,
     });
 
-    // Add InngestSpanProcessor for Inngest dashboard traces
-    // This must be done after client creation since the processor constructor
-    // registers itself in clientProcessorMap using the client reference
+    // Add InngestSpanProcessor to the OpenTelemetry provider for Inngest dashboard traces
     this.addInngestSpanProcessor();
 
     this.logger.log({
@@ -415,24 +409,26 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   }
 
   /**
-   * Manually add InngestSpanProcessor to the OTel provider.
+   * Add InngestSpanProcessor to the OpenTelemetry provider for Inngest dashboard traces.
    *
-   * Required because:
-   * - extendProvider fails with NodeSDK's ProxyTracerProvider (no addSpanProcessor method)
-   * - createProvider REPLACES our existing OTel provider, breaking Grafana/Tempo tracing
-   * - The processor constructor auto-registers in clientProcessorMap for Inngest SDK to use
+   * This handles two challenges:
+   * 1. The Inngest SDK's `extendProvider` doesn't handle OpenTelemetry's ProxyTracerProvider
+   * 2. In OpenTelemetry SDK v2.x, `addSpanProcessor` was removed from BasicTracerProvider
    *
-   * This accesses internal OTel APIs (_activeSpanProcessor._spanProcessors) which is
-   * not ideal but is the only way to:
-   * 1. Keep our existing OTel provider (for Grafana/Tempo export)
-   * 2. Add InngestSpanProcessor (for Inngest Dashboard export)
+   * Solution: Access the internal MultiSpanProcessor and push our processor directly
+   * to the `_spanProcessors` array. This works because NodeSDK uses MultiSpanProcessor
+   * internally to manage all configured span processors.
+   *
+   * @see https://opentelemetry.io/docs/languages/js/getting-started/nodejs/
    */
   private addInngestSpanProcessor(): void {
     try {
       const globalProvider = otelApi.trace.getTracerProvider();
+
+      // The OpenTelemetry API uses a proxy pattern. The actual provider
+      // is accessible via getDelegate().
       let targetProvider: any = globalProvider;
 
-      // The OTel API uses a proxy pattern - get the delegate (NodeTracerProvider)
       if ('getDelegate' in globalProvider) {
         const delegate = (globalProvider as any).getDelegate();
         if (delegate) {
@@ -440,27 +436,30 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         }
       }
 
-      // Access internal MultiSpanProcessor and add our processor
+      // In OpenTelemetry SDK v2.x, addSpanProcessor was removed from BasicTracerProvider.
+      // Span processors can only be configured at construction time via spanProcessors config.
+      // However, we can access the internal MultiSpanProcessor and push our processor directly.
       const activeProcessor = targetProvider._activeSpanProcessor;
       if (activeProcessor?._spanProcessors && Array.isArray(activeProcessor._spanProcessors)) {
-        // Create processor - constructor auto-registers in clientProcessorMap
         const processor = new InngestSpanProcessor(this.inngestClient);
         activeProcessor._spanProcessors.push(processor);
-        this.logger.log({
-          message: 'Added InngestSpanProcessor to OTel provider',
-          processorCount: activeProcessor._spanProcessors.length,
+        this.logger.debug({
+          message: 'Added InngestSpanProcessor for Inngest dashboard traces',
+          providerType: targetProvider.constructor?.name || 'unknown',
+          totalProcessors: activeProcessor._spanProcessors.length,
         });
       } else if (typeof targetProvider.addSpanProcessor === 'function') {
-        // Fallback for providers that expose addSpanProcessor directly
+        // Fallback for older SDK versions that still have addSpanProcessor
         const processor = new InngestSpanProcessor(this.inngestClient);
         targetProvider.addSpanProcessor(processor);
-        this.logger.log({
-          message: 'Added InngestSpanProcessor via addSpanProcessor()',
+        this.logger.debug({
+          message: 'Added InngestSpanProcessor via legacy addSpanProcessor method',
+          providerType: targetProvider.constructor?.name || 'unknown',
         });
       } else {
         this.logger.warn({
-          message: 'Could not add InngestSpanProcessor - no compatible method found',
-          providerType: targetProvider?.constructor?.name,
+          message: 'Could not add InngestSpanProcessor - no compatible method found on provider',
+          providerType: targetProvider.constructor?.name || 'unknown',
         });
       }
     } catch (error) {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Reverted to known working implementation from v0.11.3
+  - Restored `inngest.service.ts` from commit `0979295`
+  - Uses `behaviour: 'off'` with manual `InngestSpanProcessor` registration
+  - Removed broken changes from 0.12.0 and 0.12.1
+
 ## [0.12.1] - 2026-01-19
 
 ### Fixed
