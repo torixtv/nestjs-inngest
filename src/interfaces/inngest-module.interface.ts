@@ -192,6 +192,19 @@ export interface InngestModuleOptions {
   serveHost?: string;
 
   /**
+   * The path to report to Inngest for callbacks.
+   * If not provided, falls back to `path`.
+   *
+   * Use this when the external callback URL differs from the internal
+   * controller path (e.g., when using an API gateway that rewrites paths).
+   *
+   * Example: Internal path is `/api/inngest` but gateway exposes `/catalog/inngest`
+   * - path: 'api/inngest'
+   * - servePath: '/catalog/inngest'
+   */
+  servePath?: string;
+
+  /**
    * Disable automatic registration with Inngest dev server on module initialization
    * When true, you must call inngestService.registerWithDevServer() manually
    * Useful for dynamic port allocation or complex startup sequences

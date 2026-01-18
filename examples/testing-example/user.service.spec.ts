@@ -76,7 +76,10 @@ describe('UserService with Inngest', () => {
     });
 
     it('should send user.created event when creating a user', async () => {
-      const sendSpy = jest.spyOn(inngestService, 'send');
+      // Mock the send method to avoid network calls
+      const sendSpy = jest
+        .spyOn(inngestService, 'send')
+        .mockResolvedValue({ ids: ['test-event-id'] });
 
       const result = await service.createUser({
         email: 'test@example.com',

@@ -51,9 +51,11 @@ export function createInngestController(path: string = 'inngest') {
         serveOptions.serveHost = new URL(baseUrl).origin;
       }
 
-      // Only pass servePath if path is configured
-      if (options.path) {
-        serveOptions.servePath = `/${options.path.replace(/^\//, '')}`;
+      // Use servePath if provided, otherwise fallback to path
+      // This allows separate internal (controller) and external (callback) paths
+      const finalServePath = options.servePath || options.path;
+      if (finalServePath) {
+        serveOptions.servePath = `/${finalServePath.replace(/^\//, '')}`;
       }
 
       this.handler = serve(serveOptions);

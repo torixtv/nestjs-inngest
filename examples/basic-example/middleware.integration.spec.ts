@@ -112,14 +112,26 @@ describe('Middleware Integration Tests', () => {
 
   describe('✅ Middleware Event Sending', () => {
     it('should send events that trigger middleware functions', async () => {
+      // Mock the send method to avoid network calls
+      const mockSend = jest.fn().mockResolvedValue({ ids: ['test-event-id'] });
+      jest.spyOn(inngestService, 'send').mockImplementation(mockSend);
+
       // Test the helper method that sends events
       const result = await service.testMiddlewareFunction();
-      
+
       expect(result).toHaveProperty('testEventId');
       expect(result.testEventId).toMatch(/^test-\d+$/);
-      
-      // The fact that this completes without error proves the integration works
-      expect(result.testEventId).toBeDefined();
+
+      // Verify send was called with expected event
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'test.middleware',
+          data: expect.objectContaining({
+            testId: result.testEventId,
+            message: 'Testing middleware functionality',
+          }),
+        }),
+      );
     });
   });
 
