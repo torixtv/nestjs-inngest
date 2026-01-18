@@ -497,25 +497,47 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   /**
    * Test if the OTel tracer can create spans with valid IDs.
    * This helps diagnose whether the provider is properly configured.
+   *
+   * Tests both startSpan() and startActiveSpan() since they may behave differently
+   * with ParentBasedSampler when there's no parent context.
    */
   private testTracerSpanCreation(): void {
     try {
       // Use the same tracer name/version that Inngest SDK uses
       const tracer = otelApi.trace.getTracer('inngest', '3.49.1');
-      const span = tracer.startSpan('test-span');
-      const spanContext = span.spanContext();
 
+      // Test 1: startSpan (what we tested before)
+      const span1 = tracer.startSpan('test-span-startSpan');
+      const ctx1 = span1.spanContext();
       this.logger.debug({
-        message: 'Tracer span creation test',
-        spanId: spanContext.spanId,
-        traceId: spanContext.traceId,
-        traceFlags: spanContext.traceFlags,
-        isValidSpanId: spanContext.spanId !== '0000000000000000',
-        isValidTraceId: spanContext.traceId !== '00000000000000000000000000000000',
-        tracerName: 'inngest',
+        message: 'Tracer test: startSpan()',
+        spanId: ctx1.spanId,
+        traceId: ctx1.traceId,
+        traceFlags: ctx1.traceFlags,
+        isValidSpanId: ctx1.spanId !== '0000000000000000',
+        isRecording: span1.isRecording(),
+      });
+      span1.end();
+
+      // Test 2: startActiveSpan (what Inngest SDK uses in v2.js:70)
+      tracer.startActiveSpan('test-span-startActiveSpan', (span2) => {
+        const ctx2 = span2.spanContext();
+        this.logger.debug({
+          message: 'Tracer test: startActiveSpan()',
+          spanId: ctx2.spanId,
+          traceId: ctx2.traceId,
+          traceFlags: ctx2.traceFlags,
+          isValidSpanId: ctx2.spanId !== '0000000000000000',
+          isRecording: span2.isRecording(),
+        });
+        span2.end();
       });
 
-      span.end();
+      // Test 3: Check sampling ratio from env
+      this.logger.debug({
+        message: 'Sampling configuration',
+        OTEL_SAMPLING_RATIO: process.env.OTEL_SAMPLING_RATIO || '(not set, defaults to 1.0)',
+      });
     } catch (error) {
       this.logger.warn({
         message: 'Failed to test tracer span creation',

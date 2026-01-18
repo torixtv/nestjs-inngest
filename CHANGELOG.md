@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-01-18
+
+### Changed
+
+- **Tracing Debug**: Enhanced diagnostic to test both `startSpan()` and `startActiveSpan()`
+  - The Inngest SDK uses `startActiveSpan()` which may behave differently with ParentBasedSampler
+  - Added `isRecording` to check if spans are recording (non-recording = not sampled)
+  - Logs `OTEL_SAMPLING_RATIO` environment variable
+
 ## [0.11.7] - 2026-01-18
 
 ### Added
