@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed compatibility with OpenTelemetry SDK v2.x
+  - In SDK v2.x, `addSpanProcessor` was removed from `BasicTracerProvider`
+  - Now accesses internal `MultiSpanProcessor._spanProcessors` array directly
+  - Includes fallback for older SDK versions that still have `addSpanProcessor`
+
+## [0.11.2] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed `addSpanProcessor` detection for inherited methods
+  - The `in` operator doesn't work correctly with methods inherited from prototype chain
+  - Now uses direct `typeof` check which works properly with `NodeTracerProvider`
+
+## [0.11.1] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed InngestSpanProcessor not being added when using NodeSDK
+  - The Inngest SDK's `extendProvider` doesn't handle OpenTelemetry's ProxyTracerProvider pattern
+  - Now correctly uses `getDelegate()` to access the actual provider
+  - Traces now export to both your OTLP endpoint (Tempo/Grafana) AND Inngest dashboard
+
+## [0.11.0] - 2026-01-18
+
+### Changed
+
+- **Tracing**: Replaced custom tracing middleware with SDK's `extendedTracesMiddleware` from `inngest/experimental`
+  - Integrates with existing OpenTelemetry provider using `behaviour: 'extendProvider'` (no separate configuration needed)
+  - SDK uses `startActiveSpan()` for proper context propagation
+  - Logs from Pino and other OTel-instrumented loggers now automatically include `traceId` and `spanId`
+  - Spans are exported to both your OTLP endpoint AND Inngest dashboard
+
+### Fixed
+
+- **Log Correlation**: Fixed logs from Inngest functions not containing trace context
+  - The custom middleware was creating non-active spans that didn't propagate context
+  - Using SDK's built-in tracing which properly uses `startActiveSpan()` ensures Pino sees trace context
+
+### Deprecated
+
+- `InngestTracingService.createTracingMiddleware()` is now deprecated and returns `null`
+  - The SDK's `extendedTracesMiddleware` is used instead for proper OTel integration
+
 ## [0.10.0] - 2026-01-18
 
 ### Added

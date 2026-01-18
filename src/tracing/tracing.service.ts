@@ -615,8 +615,23 @@ export class InngestTracingService {
 
   /**
    * Create tracing middleware for Inngest functions
+   *
+   * @deprecated Custom tracing middleware is disabled. The Inngest SDK's built-in
+   * tracing uses startActiveSpan() which properly propagates context to Pino and
+   * other OTel-instrumented loggers. Use extendedTracesMiddleware from 'inngest/experimental'
+   * instead for enhanced tracing capabilities.
    */
   createTracingMiddleware() {
+    // Disabled: Custom middleware creates non-active spans that don't propagate context
+    // The SDK's core execution already uses startActiveSpan() which properly
+    // propagates context for log correlation. Using extendedTracesMiddleware instead.
+    this.logger.debug(
+      'Custom tracing middleware disabled - using SDK built-in tracing via extendedTracesMiddleware',
+    );
+    return null;
+
+    // Legacy implementation kept for reference but disabled
+    /* istanbul ignore next */
     if (!this.isTracingEnabled()) {
       this.logger.debug('OpenTelemetry tracing disabled, no middleware will be applied');
       return null;
