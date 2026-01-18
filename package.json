@@ -1,6 +1,6 @@
 {
   "name": "@torixtv/nestjs-inngest",
-  "version": "0.11.4",
+  "version": "0.11.5",
   "description": "Modern NestJS integration for Inngest - type-safe, decorator-based event-driven functions",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

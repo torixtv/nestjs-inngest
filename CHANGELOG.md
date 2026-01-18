@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed Inngest dashboard traces showing null span IDs
+  - Changed `extendedTracesMiddleware` from `behaviour: 'off'` to `behaviour: 'auto'`
+  - With `'off'`, the middleware didn't create proper spans, resulting in null span IDs (`0000000000000000`)
+  - With `'auto'`, the middleware creates real spans via `startActiveSpan()` that get properly exported
+
 ## [0.11.4] - 2026-01-18
 
 ### Added

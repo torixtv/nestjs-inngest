@@ -53,16 +53,23 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     // This middleware:
     // - Uses startActiveSpan() for proper context propagation (Pino log correlation)
     // - Handles trace context propagation correctly
-    // Note: We use behaviour: 'off' because we manually add the InngestSpanProcessor
-    // after client creation. This is needed because the Inngest SDK's extendProvider
-    // doesn't handle OpenTelemetry's ProxyTracerProvider pattern.
+    // - Calls declareStartingSpan() with proper span context for Inngest dashboard traces
+    //
+    // We use behaviour: 'auto' which will:
+    // 1. Try to extend the existing OpenTelemetry provider (via ProxyTracerProvider.getDelegate())
+    // 2. If that fails, create a new provider
+    // 3. Either way, it creates proper spans that get passed to InngestSpanProcessor
+    //
+    // Note: We still manually add InngestSpanProcessor via addInngestSpanProcessor() to ensure
+    // it's registered even if extendProvider path fails due to ProxyTracerProvider issues.
     try {
       const sdkTracingMiddleware = extendedTracesMiddleware({
-        behaviour: 'off', // We manually add the processor via addInngestSpanProcessor()
+        behaviour: 'auto',
       });
       middleware.push(sdkTracingMiddleware as any);
       this.logger.debug({
         message: 'Added SDK extendedTracesMiddleware for OpenTelemetry integration',
+        behaviour: 'auto',
       });
     } catch (error) {
       this.logger.warn({
