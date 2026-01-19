@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Restored EXACT file from working commit `2ae70ad` (v0.11.8)
+  - Git checkout of the entire file, not manual edits
+  - Includes all debug methods to ensure nothing was missed
+
+## [0.12.4] - 2026-01-19
+
+### Changed
+
+- **Tracing**: Removed debug logging methods while preserving working tracing implementation
+  - Removed `testTracerSpanCreation()` and `verifyInngestProcessorRegistration()` debug methods
+  - Core `addInngestSpanProcessor()` remains intact for Inngest dashboard traces
+
 ## [0.12.3] - 2026-01-19
 
 ### Fixed
