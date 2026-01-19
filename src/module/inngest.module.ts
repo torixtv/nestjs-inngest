@@ -50,9 +50,7 @@ export class InngestModule {
     const isConnectMode = validatedOptions.mode === 'connect';
 
     // Create dynamic controller with configured path (only for serve mode)
-    const controllers = isConnectMode
-      ? []
-      : [createInngestController(validatedOptions.path)];
+    const controllers = isConnectMode ? [] : [createInngestController(validatedOptions.path)];
 
     const imports = [DiscoveryModule];
 

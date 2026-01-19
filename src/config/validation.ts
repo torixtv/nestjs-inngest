@@ -8,10 +8,13 @@ export const ConnectOptionsSchema = z
   .object({
     instanceId: z.string().optional(),
     maxConcurrency: z.number().min(1).optional(),
+    maxWorkerConcurrency: z.number().min(1).optional(),
     handleShutdownSignals: z.array(z.string()).optional(),
     shutdownTimeout: z.number().min(1000).default(30000),
-    // Note: rewriteGatewayEndpoint is a function, validated at runtime if provided
+    // rewriteGatewayEndpoint is a function - allow any and validate at runtime
+    rewriteGatewayEndpoint: z.function().optional(),
   })
+  .passthrough() // Preserve any additional fields from Inngest SDK updates
   .optional();
 
 /**
@@ -27,8 +30,13 @@ export const InngestConfigSchema = z.object({
   path: z.string().default('/api/inngest'),
   servePort: z.number().min(1).max(65535).optional(),
   serveHost: z.string().optional(),
+  servePath: z.string().optional(),
   signingKey: z.string().optional(),
   logger: z.any().optional(),
+
+  // Disable auto-registration with Inngest dev server
+  // When true, you must call registerWithDevServer() manually or rely on sdkUrl polling
+  disableAutoRegistration: z.boolean().default(false),
 
   // Connection mode
   mode: z.enum(['serve', 'connect']).default('serve'),
@@ -245,6 +253,11 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
   // Read serveHost from INNGEST_SERVE_HOST
   if (process.env.INNGEST_SERVE_HOST) {
     envConfig.serveHost = process.env.INNGEST_SERVE_HOST;
+  }
+
+  // Read servePath from INNGEST_SERVE_PATH
+  if (process.env.INNGEST_SERVE_PATH) {
+    envConfig.servePath = process.env.INNGEST_SERVE_PATH;
   }
 
   // Read path from INNGEST_PATH

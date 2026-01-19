@@ -7,6 +7,189 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Restored EXACT file from working commit `2ae70ad` (v0.11.8)
+  - Git checkout of the entire file, not manual edits
+  - Includes all debug methods to ensure nothing was missed
+
+## [0.12.4] - 2026-01-19
+
+### Changed
+
+- **Tracing**: Removed debug logging methods while preserving working tracing implementation
+  - Removed `testTracerSpanCreation()` and `verifyInngestProcessorRegistration()` debug methods
+  - Core `addInngestSpanProcessor()` remains intact for Inngest dashboard traces
+
+## [0.12.3] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Restored to working commit `2ae70ad` (v0.11.8)
+  - Includes debug methods that may be necessary for proper initialization
+
+## [0.12.2] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Reverted to known working implementation from v0.11.3
+  - Restored `inngest.service.ts` from commit `0979295`
+  - Uses `behaviour: 'off'` with manual `InngestSpanProcessor` registration
+  - Removed broken changes from 0.12.0 and 0.12.1
+
+## [0.12.1] - 2026-01-19
+
+### Fixed
+
+- **Tracing**: Restored manual `InngestSpanProcessor` registration for Inngest dashboard traces
+  - `behaviour: 'extendProvider'` doesn't work with NodeSDK's `ProxyTracerProvider` (no `addSpanProcessor` method)
+  - Reverted to `behaviour: 'off'` with manual processor addition
+  - The processor constructor auto-registers in `clientProcessorMap` for SDK to use
+
+### Technical Notes
+
+The Inngest SDK's `extendProvider` behaviour requires `BasicTracerProvider` with `addSpanProcessor()`.
+NodeSDK wraps providers in `ProxyTracerProvider` which doesn't expose this method.
+
+Our approach:
+1. Use `behaviour: 'off'` for the middleware (provides `ctx.tracer` only)
+2. Manually add `InngestSpanProcessor` to `_activeSpanProcessor._spanProcessors`
+3. Processor constructor auto-registers in `clientProcessorMap`
+4. Traces export to both Grafana/Tempo (via OTel exporter) AND Inngest Dashboard (via `InngestSpanProcessor`)
+
+## [0.12.0] - 2026-01-18
+
+### Changed
+
+- **Tracing**: Attempted to simplify tracing with `behaviour: 'extendProvider'` (reverted in 0.12.1)
+
+### Removed
+
+- **Removed debug methods**: `testTracerSpanCreation()`, `verifyInngestProcessorRegistration()`
+- **Simplified `InngestTracingService`**: Removed deprecated `createTracingMiddleware()` and manual span creation methods
+  - Service now only handles trace context propagation (get/inject/extract)
+  - Actual tracing is fully handled by SDK's `extendedTracesMiddleware`
+
+**Breaking Change**: Requires `@torixtv/nestjs-utils@1.2.13` or later (for `/api/inngest` route inclusion).
+
+## [0.11.8] - 2026-01-18
+
+### Changed
+
+- **Tracing Debug**: Enhanced diagnostic to test both `startSpan()` and `startActiveSpan()`
+  - The Inngest SDK uses `startActiveSpan()` which may behave differently with ParentBasedSampler
+  - Added `isRecording` to check if spans are recording (non-recording = not sampled)
+  - Logs `OTEL_SAMPLING_RATIO` environment variable
+
+## [0.11.7] - 2026-01-18
+
+### Added
+
+- **Tracing Debug**: Added `testTracerSpanCreation()` diagnostic to verify OTel tracer is producing valid span IDs
+  - Tests span creation using same tracer name ("inngest") that SDK uses
+  - Logs whether spanId/traceId are valid or null (`0000000000000000`)
+  - Helps diagnose if NodeSDK is properly initialized before InngestModule
+
+## [0.11.6] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Reverted `behaviour: 'auto'` back to `behaviour: 'off'` to preserve Grafana/Tempo tracing
+  - `behaviour: 'auto'` fell back to `createProvider` which **replaced** the existing OTel provider
+  - This broke Grafana/Tempo tracing since the new provider didn't have the OTLP exporter
+  - Root cause: `extendProvider` fails with ProxyTracerProvider (no `addSpanProcessor` method)
+  - With `behaviour: 'off'`, we manually add `InngestSpanProcessor` to the existing provider
+  - The processor constructor auto-registers in `clientProcessorMap` for `declareStartingSpan()`
+
+### Technical Notes
+
+The Inngest SDK's tracing middleware has three behaviours:
+- `'extendProvider'`: Fails with NodeSDK's ProxyTracerProvider pattern
+- `'createProvider'`: Runs `trace.setGlobalTracerProvider()` - **replaces** existing provider
+- `'auto'`: Tries extend, falls back to create (same problem as create)
+
+Our solution uses `'off'` + manual processor addition to preserve the existing OTel setup.
+
+## [0.11.5] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed Inngest dashboard traces showing null span IDs
+  - Changed `extendedTracesMiddleware` from `behaviour: 'off'` to `behaviour: 'auto'`
+  - With `'off'`, the middleware didn't create proper spans, resulting in null span IDs (`0000000000000000`)
+  - With `'auto'`, the middleware creates real spans via `startActiveSpan()` that get properly exported
+
+## [0.11.4] - 2026-01-18
+
+### Added
+
+- **Tracing Debug Logging**: Added detailed logging to diagnose Inngest dashboard tracing issues
+  - Logs InngestSpanProcessor registration verification with `clientProcessorMap`
+  - Helps identify if `traceparent` header is missing from Inngest requests
+  - Enable `DEBUG=inngest:otel:*` environment variable for additional SDK-level trace logging
+
+## [0.11.3] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed compatibility with OpenTelemetry SDK v2.x
+  - In SDK v2.x, `addSpanProcessor` was removed from `BasicTracerProvider`
+  - Now accesses internal `MultiSpanProcessor._spanProcessors` array directly
+  - Includes fallback for older SDK versions that still have `addSpanProcessor`
+
+## [0.11.2] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed `addSpanProcessor` detection for inherited methods
+  - The `in` operator doesn't work correctly with methods inherited from prototype chain
+  - Now uses direct `typeof` check which works properly with `NodeTracerProvider`
+
+## [0.11.1] - 2026-01-18
+
+### Fixed
+
+- **Tracing**: Fixed InngestSpanProcessor not being added when using NodeSDK
+  - The Inngest SDK's `extendProvider` doesn't handle OpenTelemetry's ProxyTracerProvider pattern
+  - Now correctly uses `getDelegate()` to access the actual provider
+  - Traces now export to both your OTLP endpoint (Tempo/Grafana) AND Inngest dashboard
+
+## [0.11.0] - 2026-01-18
+
+### Changed
+
+- **Tracing**: Replaced custom tracing middleware with SDK's `extendedTracesMiddleware` from `inngest/experimental`
+  - Integrates with existing OpenTelemetry provider using `behaviour: 'extendProvider'` (no separate configuration needed)
+  - SDK uses `startActiveSpan()` for proper context propagation
+  - Logs from Pino and other OTel-instrumented loggers now automatically include `traceId` and `spanId`
+  - Spans are exported to both your OTLP endpoint AND Inngest dashboard
+
+### Fixed
+
+- **Log Correlation**: Fixed logs from Inngest functions not containing trace context
+  - The custom middleware was creating non-active spans that didn't propagate context
+  - Using SDK's built-in tracing which properly uses `startActiveSpan()` ensures Pino sees trace context
+
+### Deprecated
+
+- `InngestTracingService.createTracingMiddleware()` is now deprecated and returns `null`
+  - The SDK's `extendedTracesMiddleware` is used instead for proper OTel integration
+
+## [0.10.0] - 2026-01-18
+
+### Added
+
+- **`servePath` Configuration Option**: New option to specify a separate callback path for Inngest to use when sending events back to your application
+  - Allows decoupling the internal serve endpoint from the external callback URL
+  - Useful for scenarios with reverse proxies, API gateways, or custom routing configurations
+  - Example: `serveHost: 'https://api.example.com'`, `servePath: '/webhooks/inngest'`
+
+### Fixed
+
+- **Zod Schema Validation**: Added `disableAutoRegistration` to the Zod configuration schema
+
 ## [0.5.0] - 2026-01-15
 
 ### Added
