@@ -135,12 +135,16 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     if (this.options.mode === 'connect') {
       // Delay connection to allow InngestExplorer to finish discovering functions
       setTimeout(() => {
-        this.establishConnection();
+        this.establishConnection().catch((err) => {
+          this.logger.error('Failed to establish connection', err);
+        });
       }, 1000);
     } else {
       // Default serve mode - register with dev server
       setTimeout(() => {
-        this.registerWithDevServer();
+        this.registerWithDevServer().catch((err) => {
+          this.logger.error('Failed to register with dev server', err);
+        });
       }, 1000);
     }
   }

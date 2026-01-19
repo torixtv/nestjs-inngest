@@ -8,10 +8,13 @@ export const ConnectOptionsSchema = z
   .object({
     instanceId: z.string().optional(),
     maxConcurrency: z.number().min(1).optional(),
+    maxWorkerConcurrency: z.number().min(1).optional(),
     handleShutdownSignals: z.array(z.string()).optional(),
     shutdownTimeout: z.number().min(1000).default(30000),
-    // Note: rewriteGatewayEndpoint is a function, validated at runtime if provided
+    // rewriteGatewayEndpoint is a function - allow any and validate at runtime
+    rewriteGatewayEndpoint: z.function().optional(),
   })
+  .passthrough() // Preserve any additional fields from Inngest SDK updates
   .optional();
 
 /**
