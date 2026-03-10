@@ -16,6 +16,7 @@ Modern NestJS integration for [Inngest](https://inngest.com) - the durable funct
 - [Core Concepts](#core-concepts)
 - [Advanced Features](#advanced-features)
 - [Connection Modes](#connection-modes)
+- [Migration Guide](./MIGRATION_GUIDE.md)
 - [Real-World Examples](#real-world-examples)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -29,7 +30,7 @@ Modern NestJS integration for [Inngest](https://inngest.com) - the durable funct
 
 - **Durable execution** - Functions survive server restarts and failures
 - **Automatic retries** - Built-in retry logic with exponential backoff
-- **Step functions** - Break complex workflows into reliable, resumable steps  
+- **Step functions** - Break complex workflows into reliable, resumable steps
 - **Event-driven architecture** - Trigger functions with type-safe events
 - **Observability** - Built-in logging, metrics, and tracing
 - **Local development** - Full local development server with UI
@@ -77,6 +78,7 @@ npm install @nestjs/terminus @nestjs/platform-express
 ```
 
 > **⚠️ OpenTelemetry Version Constraints**: Due to Inngest's OpenTelemetry dependencies, you must use compatible versions:
+>
 > - `@opentelemetry/api@^1.9.0` (latest stable)
 > - `@opentelemetry/sdk-node@^0.56.0` (matches Inngest v3.40.x)
 >
@@ -153,7 +155,7 @@ export class UserService {
   // Method to trigger the function
   async createUser(email: string) {
     const userId = `user-${Date.now()}`;
-    
+
     // Send event to trigger the function
     await this.inngestService.send({
       name: 'user.created',
@@ -202,8 +204,8 @@ export class OrderService {
     retries: 3,
     batchEvents: {
       maxSize: 10,
-      timeout: '5m'
-    }
+      timeout: '5m',
+    },
   })
   async processOrder({ event, step }: { event: any; step: any }) {
     // Your function logic here
@@ -518,7 +520,7 @@ import { InngestModule } from '@torixtv/nestjs-inngest';
         enabled: true,
         serviceName: 'my-nestjs-service',
         includeEventData: false, // For privacy
-        includeStepData: true,   // For debugging
+        includeStepData: true, // For debugging
         defaultAttributes: {
           'service.version': '1.0.0',
           'deployment.environment': process.env.NODE_ENV,
@@ -542,7 +544,7 @@ export class OrderService {
   @InngestEvent('process-order', 'order.created')
   async processOrder({ event, step }) {
     // Tracing is automatic - each step becomes a span
-    
+
     const validation = await step.run('validate-order', async () => {
       // This step is automatically traced
       return await this.validateOrder(event.data.orderId);
@@ -576,13 +578,13 @@ import { trace } from '@opentelemetry/api';
 async customTracedFunction({ event, step }) {
   // Get the current span to add custom attributes
   const span = trace.getActiveSpan();
-  
+
   await step.run('custom-step', async () => {
     span?.setAttributes({
       'custom.user_id': event.data.userId,
       'custom.operation_type': 'data_processing',
     });
-    
+
     // Your logic here
     return { processed: true };
   });
@@ -726,22 +728,19 @@ export class HealthController {
   @Get('liveness')
   @HealthCheck()
   liveness(): Promise<HealthCheckResult> {
-    return this.health.check([
-      () => this.inngest.isHealthy('inngest'),
-    ]);
+    return this.health.check([() => this.inngest.isHealthy('inngest')]);
   }
 
   @Get('readiness')
   @HealthCheck()
   readiness(): Promise<HealthCheckResult> {
-    return this.health.check([
-      () => this.inngest.isReady('inngest'),
-    ]);
+    return this.health.check([() => this.inngest.isReady('inngest')]);
   }
 }
 ```
 
 The health indicator is connection-mode aware:
+
 - **Serve mode**: Returns healthy if Inngest client is initialized
 - **Connect mode**: Returns healthy only when WebSocket connection is `ACTIVE`
 
@@ -807,9 +806,7 @@ export const getInngestConfig = (): InngestModuleOptions => {
 
 // app.module.ts
 @Module({
-  imports: [
-    InngestModule.forRoot(getInngestConfig()),
-  ],
+  imports: [InngestModule.forRoot(getInngestConfig())],
 })
 export class AppModule {}
 ```
@@ -883,16 +880,19 @@ When configuring the Inngest module, you're dealing with three separate concerns
 ##### Common Confusion Points
 
 **"What is serveHost/servePort for?"**
+
 - These are NOT Inngest's host/port (that's `baseUrl`)
 - These tell Inngest where YOUR app is running
 - Think of them as "my app's address" not "Inngest's address"
 
 **"Does path respect NestJS global prefix?"**
+
 - No, the `@Controller` decorator doesn't know about global prefix at decoration time
 - If you use `app.setGlobalPrefix('api')`, you must set `path: 'api/inngest'` manually
 - This is consistent with how other NestJS packages work (like `@nestjs/swagger`)
 
 **"Do I need to configure servePort if my app runs on the default port?"**
+
 - If your app runs on port 3000: No configuration needed (it's the default)
 - If your app runs on a different port: Yes, you must set `servePort` to match
 - The module defaults to `process.env.PORT || 3000`, so setting `PORT` env var works too
@@ -933,7 +933,7 @@ InngestModule.forRoot({
   // servePort auto-reads from INNGEST_SERVE_PORT or PORT
   // serveHost auto-reads from INNGEST_SERVE_HOST
   // path auto-reads from INNGEST_PATH
-})
+});
 ```
 
 #### Common Configuration Patterns
@@ -953,7 +953,7 @@ InngestModule.forRoot({
   // - servePort: 3000
   // - serveHost: 'localhost'
   // - path: 'inngest'
-})
+});
 
 // Your functions will be accessible at: http://localhost:3000/inngest
 // Inngest dev server will auto-register and call this URL
@@ -969,7 +969,7 @@ InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288',
   servePort: 3002, // Must match where your app actually listens
-})
+});
 
 // Or better - use environment variable:
 // In main.ts:
@@ -981,7 +981,7 @@ InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288',
   servePort: parseInt(process.env.PORT || '3002'),
-})
+});
 ```
 
 ##### Pattern 3: With NestJS Global Prefix
@@ -999,7 +999,7 @@ InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288',
   path: 'api/inngest', // MUST include the global prefix manually
-})
+});
 
 // Your functions will be at: http://localhost:3000/api/inngest
 // NOT at: http://localhost:3000/inngest
@@ -1024,7 +1024,7 @@ InngestModule.forRootAsync({
     // because Inngest Cloud reaches you via your public URL
   }),
   inject: [ConfigService],
-})
+});
 ```
 
 ##### Pattern 5: Kubernetes Deployment
@@ -1050,16 +1050,17 @@ InngestModule.forRootAsync({
     // Module will auto-read these
   }),
   inject: [ConfigService],
-})
+});
 ```
 
 **Kubernetes deployment YAML:**
+
 ```yaml
 env:
   - name: INNGEST_SERVE_HOST
-    value: "my-app-service.default.svc.cluster.local"
+    value: 'my-app-service.default.svc.cluster.local'
   - name: PORT
-    value: "8080"
+    value: '8080'
   - name: INNGEST_APP_ID
     valueFrom:
       configMapKeyRef:
@@ -1078,10 +1079,11 @@ InngestModule.forRoot({
   baseUrl: 'http://inngest:8288',
   serveHost: 'app', // Docker service name for your NestJS app
   servePort: 3000,
-})
+});
 ```
 
 **docker-compose.yml:**
+
 ```yaml
 services:
   app:
@@ -1108,7 +1110,7 @@ InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288',
   disableAutoRegistration: true, // Don't register on module init
-})
+});
 
 // In main.ts - register manually after app.listen()
 async function bootstrap() {
@@ -1129,12 +1131,14 @@ async function bootstrap() {
 ```
 
 **When to use this:**
+
 - Dynamic port allocation (port 0)
 - Complex startup sequences
 - Testing scenarios
 - When you need to defer registration
 
 **When to use these options:**
+
 - Your app runs on a non-standard port (not 3000)
 - You need custom host configuration for Docker/containers
 - Multiple NestJS apps with Inngest on different ports
@@ -1142,6 +1146,8 @@ async function bootstrap() {
 - Kubernetes deployments with service DNS
 
 ## Connection Modes
+
+If you are migrating existing consumers from `serve` to `connect`, start with the dedicated [Migration Guide](./MIGRATION_GUIDE.md). It covers gradual rollout, health checks, and the `isolateExecution` option for teams that previously saw connection drops.
 
 The module supports two connection modes for communicating with Inngest:
 
@@ -1154,10 +1160,11 @@ InngestModule.forRoot({
   id: 'my-app',
   mode: 'serve', // Default - can be omitted
   baseUrl: 'http://localhost:8288',
-})
+});
 ```
 
 **Characteristics:**
+
 - Uses HTTP webhooks - Inngest calls your `/api/inngest` endpoint
 - Requires your app to be publicly accessible (or tunneled in development)
 - Traditional request-response model
@@ -1173,15 +1180,17 @@ InngestModule.forRoot({
   mode: 'connect',
   signingKey: process.env.INNGEST_SIGNING_KEY,
   connect: {
-    instanceId: 'worker-1',        // Optional: unique identifier for this worker
-    maxConcurrency: 10,            // Optional: max concurrent function executions
-    shutdownTimeout: 30000,        // Optional: graceful shutdown timeout in ms
+    instanceId: 'worker-1', // Optional: unique identifier for this worker
+    maxWorkerConcurrency: 10, // Optional: max concurrent function executions
+    isolateExecution: true, // Optional: run connection management in a worker thread
+    shutdownTimeout: 30000, // Optional: graceful shutdown timeout in ms
     handleShutdownSignals: ['SIGTERM', 'SIGINT'], // Optional: signals to handle
   },
-})
+});
 ```
 
 **Characteristics:**
+
 - Persistent WebSocket connection - your app connects to Inngest
 - No need for public HTTP endpoint - works behind firewalls
 - Ideal for Kubernetes, Docker, and containerized environments
@@ -1190,14 +1199,14 @@ InngestModule.forRoot({
 
 ### When to Use Each Mode
 
-| Use Case | Recommended Mode |
-|----------|------------------|
-| Serverless (Vercel, Lambda) | Serve |
-| Kubernetes deployment | Connect |
-| Behind corporate firewall | Connect |
-| Development with Inngest CLI | Serve |
-| Long-running workers | Connect |
-| Hybrid cloud/on-prem | Connect |
+| Use Case                     | Recommended Mode |
+| ---------------------------- | ---------------- |
+| Serverless (Vercel, Lambda)  | Serve            |
+| Kubernetes deployment        | Connect          |
+| Behind corporate firewall    | Connect          |
+| Development with Inngest CLI | Serve            |
+| Long-running workers         | Connect          |
+| Hybrid cloud/on-prem         | Connect          |
 
 ### Environment Variable Configuration
 
@@ -1213,12 +1222,14 @@ INNGEST_MODE=connect
 
 ### Connect Mode Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `instanceId` | `string` | Auto-generated UUID | Unique identifier for this worker instance |
-| `maxConcurrency` | `number` | `undefined` | Maximum concurrent function executions |
-| `shutdownTimeout` | `number` | `30000` | Time in ms to wait for graceful shutdown |
-| `handleShutdownSignals` | `string[]` | `['SIGTERM', 'SIGINT']` | Process signals to handle for shutdown |
+| Option                  | Type       | Default                 | Description                                           |
+| ----------------------- | ---------- | ----------------------- | ----------------------------------------------------- |
+| `instanceId`            | `string`   | Hostname/platform ID    | Unique identifier for this worker instance            |
+| `maxWorkerConcurrency`  | `number`   | `undefined`             | Maximum concurrent function executions                |
+| `maxConcurrency`        | `number`   | `undefined`             | Deprecated alias for `maxWorkerConcurrency`           |
+| `isolateExecution`      | `boolean`  | `false`                 | Run connection management in a separate worker thread |
+| `shutdownTimeout`       | `number`   | `30000`                 | Time in ms to wait for graceful shutdown              |
+| `handleShutdownSignals` | `string[]` | `['SIGTERM', 'SIGINT']` | Process signals to handle for shutdown                |
 
 ### Connection State API
 
@@ -1244,6 +1255,7 @@ export class MyService {
 ```
 
 **Connection States:**
+
 - `ACTIVE` - Connected and ready to receive work
 - `CONNECTING` - Initial connection in progress
 - `RECONNECTING` - Reconnecting after disconnect
@@ -1300,27 +1312,27 @@ spec:
   template:
     spec:
       containers:
-      - name: worker
-        image: my-app:latest
-        env:
-        - name: INNGEST_MODE
-          value: "connect"
-        - name: INNGEST_SIGNING_KEY
-          valueFrom:
-            secretKeyRef:
-              name: inngest-secrets
-              key: signing-key
-        # Each pod gets a unique instance ID from metadata
-        - name: INNGEST_INSTANCE_ID
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        livenessProbe:
-          httpGet:
-            path: /health/inngest
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
+        - name: worker
+          image: my-app:latest
+          env:
+            - name: INNGEST_MODE
+              value: 'connect'
+            - name: INNGEST_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: inngest-secrets
+                  key: signing-key
+            # Each pod gets a unique instance ID from metadata
+            - name: INNGEST_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          livenessProbe:
+            httpGet:
+              path: /health/inngest
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
 ```
 
 ```typescript
@@ -1332,11 +1344,11 @@ InngestModule.forRootAsync({
     signingKey: process.env.INNGEST_SIGNING_KEY,
     connect: {
       instanceId: process.env.INNGEST_INSTANCE_ID, // From K8s metadata.name
-      maxConcurrency: 5,
+      maxWorkerConcurrency: 5,
       shutdownTimeout: 60000, // Give K8s time for graceful shutdown
     },
   }),
-})
+});
 ```
 
 ### Graceful Shutdown
@@ -1365,7 +1377,7 @@ InngestModule.forRoot({
     // Extended timeout for long-running functions
     shutdownTimeout: 120000, // 2 minutes
   },
-})
+});
 ```
 
 ## Real-World Examples
@@ -1420,7 +1432,7 @@ export class UserOnboardingService {
         await this.userService.markAsUnverified(userId);
         return { reminderSent: true };
       });
-      
+
       return { status: 'verification-timeout', userId };
     }
 
@@ -1449,10 +1461,10 @@ export class UserOnboardingService {
       },
     ]);
 
-    return { 
-      status: 'completed', 
-      userId, 
-      verifiedAt: verificationEvent.data.verifiedAt 
+    return {
+      status: 'completed',
+      userId,
+      verifiedAt: verificationEvent.data.verifiedAt,
     };
   }
 
@@ -1464,7 +1476,7 @@ export class UserOnboardingService {
 
     for (let i = 0; i < tips.length; i++) {
       await step.sleep(`wait-between-tips-${i}`, '3d'); // Wait 3 days between tips
-      
+
       await step.run(`send-tip-${i + 1}`, async () => {
         await this.emailService.sendTip(email, tips[i]);
         return { tipSent: true, tipIndex: i + 1 };
@@ -1507,15 +1519,15 @@ export class OrderProcessingService {
       const validation = await step.run('validate-order', async () => {
         const order = await this.orderService.getOrder(orderId);
         const inventoryCheck = await this.inventoryService.checkAvailability(items);
-        
+
         if (!inventoryCheck.available) {
           throw new Error(`Insufficient inventory: ${inventoryCheck.unavailableItems.join(', ')}`);
         }
 
-        return { 
-          order, 
+        return {
+          order,
           totalAmount: order.totalAmount,
-          inventoryReserved: inventoryCheck.reservationId 
+          inventoryReserved: inventoryCheck.reservationId,
         };
       });
 
@@ -1575,11 +1587,11 @@ export class OrderProcessingService {
       await step.sendEvent('order-processed-events', [
         {
           name: 'analytics.order-completed',
-          data: { 
-            orderId, 
-            customerId, 
+          data: {
+            orderId,
+            customerId,
             amount: payment.paidAmount,
-            timestamp: new Date() 
+            timestamp: new Date(),
           },
         },
         {
@@ -1607,13 +1619,12 @@ export class OrderProcessingService {
         transactionId: payment.transactionId,
         fulfillmentOrderId: fulfillment.fulfillmentOrderId,
       };
-
     } catch (error) {
       // Handle failures - release any reserved inventory
       await step.run('handle-order-failure', async () => {
         await this.inventoryService.releaseReservation(orderId);
         await this.orderService.markAsFailed(orderId, error.message);
-        
+
         // Send failure notification
         await this.emailService.sendOrderFailureNotification({
           email: validation?.order?.customerEmail,
@@ -1699,8 +1710,8 @@ export class DataCleanupService {
     const sessionCleanup = await step.run('cleanup-expired-sessions', async () => {
       const expiredSessions = await this.sessionService.getExpiredSessions();
       const deletedCount = await this.sessionService.deleteExpiredSessions();
-      
-      return { 
+
+      return {
         expiredSessionsFound: expiredSessions.length,
         deletedSessions: deletedCount,
       };
@@ -1710,7 +1721,7 @@ export class DataCleanupService {
     const fileCleanup = await step.run('cleanup-temporary-files', async () => {
       const tempFiles = await this.fileService.getTemporaryFiles();
       const deletedFiles = [];
-      
+
       for (const file of tempFiles) {
         try {
           await this.fileService.deleteFile(file.id);
@@ -1732,7 +1743,7 @@ export class DataCleanupService {
       cutoffDate.setMonth(cutoffDate.getMonth() - 6); // Archive logs older than 6 months
 
       const oldLogs = await this.auditService.getLogsOlderThan(cutoffDate);
-      const archivedCount = await this.auditService.archiveLogs(oldLogs.map(log => log.id));
+      const archivedCount = await this.auditService.archiveLogs(oldLogs.map((log) => log.id));
 
       return {
         oldLogsFound: oldLogs.length,
@@ -1801,7 +1812,7 @@ export class DataCleanupService {
     await step.run('cleanup-old-backups', async () => {
       const oldBackups = await this.backupService.getOldBackups(30); // Older than 30 days
       const deletedCount = await this.backupService.deleteBackups(oldBackups);
-      
+
       return {
         oldBackupsFound: oldBackups.length,
         deletedBackups: deletedCount,
@@ -1878,7 +1889,7 @@ export class OrderService {
   }
 }
 
-// Inventory Service  
+// Inventory Service
 @Injectable()
 export class InventoryService {
   @InngestEvent('reserve-inventory', 'inventory.reserve-requested')
@@ -1887,7 +1898,7 @@ export class InventoryService {
 
     const reservation = await step.run('check-and-reserve', async () => {
       const availability = await this.checkAvailability(items);
-      
+
       if (!availability.available) {
         throw new Error(`Items not available: ${availability.unavailableItems.join(', ')}`);
       }
@@ -1936,7 +1947,7 @@ export class FulfillmentService {
     const fulfillmentOrder = await step.run('create-fulfillment', async () => {
       const orderDetails = await this.getOrderDetails(orderId);
       const fulfillmentId = await this.createFulfillmentOrder(orderDetails);
-      
+
       return { fulfillmentId, orderDetails };
     });
 
@@ -2018,24 +2029,24 @@ export class NotificationService {
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `id` | `string` | **Required** | Your Inngest app ID |
-| `eventKey` | `string` | `undefined` | Event key for sending events |
-| `baseUrl` | `string` | `undefined` | Inngest server URL (omit for cloud) |
-| `signingKey` | `string` | `undefined` | Webhook signing key for production |
-| `isGlobal` | `boolean` | `false` | Make module available globally |
-| `mode` | `'serve' \| 'connect'` | `'serve'` | Connection mode: HTTP webhooks or WebSocket |
-| `connect` | `InngestConnectOptions` | `{}` | Connect mode configuration (see [Connection Modes](#connection-modes)) |
-| `path` | `string` | `'inngest'` | API endpoint path (serve mode only) |
-| `servePort` | `number` | `process.env.PORT \|\| 3000` | Port where your app runs (for auto-registration) |
-| `serveHost` | `string` | `'localhost'` | Host/URL where your app runs. Can be hostname (`'localhost'`) or full URL (`'https://myapp.com'`) |
-| `environment` | `string` | `'development'` | Environment name |
-| `middleware` | `InngestMiddleware[]` | `[]` | Global middleware |
-| `logger` | `any` | `undefined` | Custom logger |
-| `tracing` | `InngestTracingConfig` | `{}` | Tracing configuration |
-| `monitoring` | `InngestMonitoringConfig` | `{}` | Monitoring configuration |
-| `health` | `InngestHealthConfig` | `{}` | Health check configuration |
+| Option        | Type                      | Default                      | Description                                                                                       |
+| ------------- | ------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `id`          | `string`                  | **Required**                 | Your Inngest app ID                                                                               |
+| `eventKey`    | `string`                  | `undefined`                  | Event key for sending events                                                                      |
+| `baseUrl`     | `string`                  | `undefined`                  | Inngest server URL (omit for cloud)                                                               |
+| `signingKey`  | `string`                  | `undefined`                  | Webhook signing key for production                                                                |
+| `isGlobal`    | `boolean`                 | `false`                      | Make module available globally                                                                    |
+| `mode`        | `'serve' \| 'connect'`    | `'serve'`                    | Connection mode: HTTP webhooks or WebSocket                                                       |
+| `connect`     | `InngestConnectOptions`   | `{}`                         | Connect mode configuration (see [Connection Modes](#connection-modes))                            |
+| `path`        | `string`                  | `'inngest'`                  | API endpoint path (serve mode only)                                                               |
+| `servePort`   | `number`                  | `process.env.PORT \|\| 3000` | Port where your app runs (for auto-registration)                                                  |
+| `serveHost`   | `string`                  | `'localhost'`                | Host/URL where your app runs. Can be hostname (`'localhost'`) or full URL (`'https://myapp.com'`) |
+| `environment` | `string`                  | `'development'`              | Environment name                                                                                  |
+| `middleware`  | `InngestMiddleware[]`     | `[]`                         | Global middleware                                                                                 |
+| `logger`      | `any`                     | `undefined`                  | Custom logger                                                                                     |
+| `tracing`     | `InngestTracingConfig`    | `{}`                         | Tracing configuration                                                                             |
+| `monitoring`  | `InngestMonitoringConfig` | `{}`                         | Monitoring configuration                                                                          |
+| `health`      | `InngestHealthConfig`     | `{}`                         | Health check configuration                                                                        |
 
 ### Decorators
 
@@ -2043,8 +2054,8 @@ export class NotificationService {
 
 ```typescript
 interface InngestFunctionConfig {
-  id: string;                    // Unique function ID
-  trigger: TriggerConfig;        // Event trigger or cron schedule
+  id: string; // Unique function ID
+  trigger: TriggerConfig; // Event trigger or cron schedule
   concurrency?: number | ConcurrencyConfig;
   retries?: number;
   batchEvents?: BatchConfig;
@@ -2063,10 +2074,10 @@ Shorthand for event-triggered functions.
 // Simple event
 @InngestEvent('function-id', 'event.name')
 
-// Event with conditions  
-@InngestEvent('function-id', { 
-  event: 'event.name', 
-  if: 'event.data.amount > 100' 
+// Event with conditions
+@InngestEvent('function-id', {
+  event: 'event.name',
+  if: 'event.data.amount > 100'
 })
 
 // Multiple events
@@ -2099,25 +2110,32 @@ Shorthand for scheduled functions.
 ```typescript
 class InngestService {
   // Send single event
-  send(event: EventPayload): Promise<void>
+  send(event: EventPayload): Promise<void>;
 
   // Send multiple events
-  send(events: EventPayload[]): Promise<void>
+  send(events: EventPayload[]): Promise<void>;
 
   // Get Inngest client instance
-  getClient(): Inngest
+  getClient(): Inngest;
 
   // Get current connection state (connect mode only)
-  getConnectionState(): 'ACTIVE' | 'CONNECTING' | 'RECONNECTING' | 'PAUSED' | 'CLOSING' | 'CLOSED' | 'NOT_APPLICABLE'
+  getConnectionState():
+    | 'ACTIVE'
+    | 'CONNECTING'
+    | 'RECONNECTING'
+    | 'PAUSED'
+    | 'CLOSING'
+    | 'CLOSED'
+    | 'NOT_APPLICABLE';
 
   // Check if actively connected (connect mode only)
-  isConnected(): boolean
+  isConnected(): boolean;
 
   // Get module options
-  getOptions(): InngestModuleOptions
+  getOptions(): InngestModuleOptions;
 
   // Get registered functions
-  getFunctions(): InngestFunction[]
+  getFunctions(): InngestFunction[];
 }
 ```
 
@@ -2130,10 +2148,10 @@ class InngestHealthIndicator {
   // Check if Inngest is healthy
   // - Serve mode: client is initialized
   // - Connect mode: WebSocket connection is ACTIVE
-  isHealthy(key: string): Promise<HealthIndicatorResult>
+  isHealthy(key: string): Promise<HealthIndicatorResult>;
 
   // Check if Inngest is ready (includes function registration check)
-  isReady(key: string): Promise<HealthIndicatorResult>
+  isReady(key: string): Promise<HealthIndicatorResult>;
 }
 ```
 
@@ -2142,25 +2160,28 @@ class InngestHealthIndicator {
 ```typescript
 interface StepTools {
   // Run a step
-  run<T>(id: string, fn: () => Promise<T>): Promise<T>
-  
+  run<T>(id: string, fn: () => Promise<T>): Promise<T>;
+
   // Wait for an event
-  waitForEvent(id: string, config: {
-    event: string;
-    timeout: string;
-    if?: string;
-    match?: string;
-  }): Promise<EventPayload | null>
-  
+  waitForEvent(
+    id: string,
+    config: {
+      event: string;
+      timeout: string;
+      if?: string;
+      match?: string;
+    },
+  ): Promise<EventPayload | null>;
+
   // Send event(s)
-  sendEvent(id: string, event: EventPayload): Promise<void>
-  sendEvent(id: string, events: EventPayload[]): Promise<void>
-  
+  sendEvent(id: string, event: EventPayload): Promise<void>;
+  sendEvent(id: string, events: EventPayload[]): Promise<void>;
+
   // Sleep for a duration
-  sleep(id: string, duration: string): Promise<void>
-  
+  sleep(id: string, duration: string): Promise<void>;
+
   // Sleep until a specific time
-  sleepUntil(id: string, date: Date): Promise<void>
+  sleepUntil(id: string, date: Date): Promise<void>;
 }
 ```
 
@@ -2232,10 +2253,7 @@ describe('UserService', () => {
     const result = await service.welcomeNewUser(mockContext);
 
     expect(result.success).toBe(true);
-    expect(mockContext.step.run).toHaveBeenCalledWith(
-      'send-welcome-email',
-      expect.any(Function)
-    );
+    expect(mockContext.step.run).toHaveBeenCalledWith('send-welcome-email', expect.any(Function));
   });
 });
 ```
@@ -2256,7 +2274,7 @@ describe('UserService Integration', () => {
         id: 'test-app',
         eventKey: 'test-key',
       },
-      [UserService]
+      [UserService],
     );
 
     service = module.get<UserService>(UserService);
@@ -2310,9 +2328,7 @@ it('should handle step failures', async () => {
     return await fn();
   });
 
-  await expect(service.welcomeNewUser(mockContext)).rejects.toThrow(
-    'Email service unavailable'
-  );
+  await expect(service.welcomeNewUser(mockContext)).rejects.toThrow('Email service unavailable');
 
   // Ensure subsequent steps weren't called
   expect(mockContext.step.run).toHaveBeenCalledTimes(1);
@@ -2393,15 +2409,15 @@ export const productionConfig: InngestModuleOptions = {
   eventKey: process.env.INNGEST_EVENT_KEY,
   signingKey: process.env.INNGEST_SIGNING_KEY!,
   environment: 'production',
-  
+
   // Remove baseUrl to use Inngest Cloud
   baseUrl: undefined,
-  
+
   // Production middleware
   middleware: [
     // Add your production middleware here
   ],
-  
+
   // Enable monitoring and health checks
   monitoring: {
     enabled: true,
@@ -2409,7 +2425,7 @@ export const productionConfig: InngestModuleOptions = {
     metricsInterval: 30000,
     enableTracing: process.env.ENABLE_TRACING === 'true',
   },
-  
+
   health: {
     enabled: true,
     path: '/health/inngest',
@@ -2417,12 +2433,12 @@ export const productionConfig: InngestModuleOptions = {
     enableMetrics: true,
     checkInterval: 60000,
   },
-  
+
   tracing: {
     enabled: process.env.ENABLE_TRACING === 'true',
     serviceName: process.env.SERVICE_NAME,
     includeEventData: false, // Privacy in production
-    includeStepData: false,  // Performance in production
+    includeStepData: false, // Performance in production
   },
 };
 ```
@@ -2509,33 +2525,33 @@ spec:
         app: nestjs-inngest-app
     spec:
       containers:
-      - name: app
-        image: my-registry/nestjs-inngest-app:latest
-        ports:
-        - containerPort: 3000
-        env:
-        - name: INNGEST_APP_ID
-          valueFrom:
-            configMapKeyRef:
-              name: inngest-config
-              key: app-id
-        - name: INNGEST_SIGNING_KEY
-          valueFrom:
-            secretKeyRef:
-              name: inngest-secrets
-              key: signing-key
-        livenessProbe:
-          httpGet:
-            path: /health/inngest
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health/inngest
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
+        - name: app
+          image: my-registry/nestjs-inngest-app:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: INNGEST_APP_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: inngest-config
+                  key: app-id
+            - name: INNGEST_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: inngest-secrets
+                  key: signing-key
+          livenessProbe:
+            httpGet:
+              path: /health/inngest
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/inngest
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
 ---
 apiVersion: v1
 kind: Service
@@ -2545,8 +2561,8 @@ spec:
   selector:
     app: nestjs-inngest-app
   ports:
-  - port: 80
-    targetPort: 3000
+    - port: 80
+      targetPort: 3000
   type: LoadBalancer
 ```
 
@@ -2563,9 +2579,8 @@ export class RobustOrderService {
       const result = await step.run('process-payment', async () => {
         return await this.processPayment(event.data);
       });
-      
+
       return result;
-      
     } catch (error) {
       // Log the error with context
       this.logger.error('Order processing failed', {
@@ -2582,7 +2597,7 @@ export class RobustOrderService {
           await this.notifyCustomerPaymentDeclined(event.data.orderId);
           return { handled: true };
         });
-        
+
         return { success: false, reason: 'payment_declined' };
       }
 
@@ -2609,14 +2624,14 @@ export class MonitoringService {
     const metrics = await step.run('gather-function-metrics', async () => {
       const functionMetrics = await this.inngestMonitoring.getFunctionMetrics();
       const systemMetrics = await this.inngestMonitoring.getSystemMetrics();
-      
+
       // Send to your monitoring system (Prometheus, DataDog, etc.)
       await this.metricsService.recordFunctionMetrics(functionMetrics);
       await this.metricsService.recordSystemMetrics(systemMetrics);
-      
-      return { 
+
+      return {
         functionsCount: functionMetrics.length,
-        systemMemoryUsage: systemMetrics.memory.percentage 
+        systemMemoryUsage: systemMetrics.memory.percentage,
       };
     });
 
@@ -2646,6 +2661,7 @@ export class MonitoringService {
 **Problem:** Your functions aren't showing up in the Inngest dev server UI.
 
 **Solutions:**
+
 1. Check that your NestJS app is running and accessible
 2. Verify the `baseUrl` in your configuration points to the dev server
 3. Ensure functions are properly decorated and in providers array
@@ -2665,15 +2681,16 @@ curl -X PUT http://localhost:3000/inngest
 InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288', // ✓ Must be where Inngest dev server runs
-  serveHost: 'localhost',             // ✓ Must be where YOUR app runs
-  servePort: 3000,                    // ✓ Must match app.listen() port
-  path: 'inngest',                    // ✓ Endpoint path in your app
-})
+  serveHost: 'localhost', // ✓ Must be where YOUR app runs
+  servePort: 3000, // ✓ Must match app.listen() port
+  path: 'inngest', // ✓ Endpoint path in your app
+});
 ```
 
 **Check auto-registration in logs:**
 
 Look for these log messages when your app starts:
+
 ```
 [Inngest] Initializing Inngest module...
 [Inngest] Registering functions with dev server...
@@ -2689,6 +2706,7 @@ If you see errors like `ECONNREFUSED`, the `baseUrl` is wrong or Inngest dev ser
 **Root Cause:** `servePort` doesn't match the actual port your app is listening on.
 
 **Diagnosis:**
+
 ```bash
 # Check what port your app is actually on:
 netstat -an | grep LISTEN | grep 3000
@@ -2708,7 +2726,7 @@ await app.listen(3002); // App listens on 3002
 // module
 InngestModule.forRoot({
   servePort: 3000, // ❌ Config says 3000 - MISMATCH!
-})
+});
 
 // ✓ CORRECT - Ports match:
 // main.ts
@@ -2718,7 +2736,7 @@ await app.listen(port);
 // module
 InngestModule.forRoot({
   servePort: parseInt(process.env.PORT || '3002'), // ✓ Same port
-})
+});
 ```
 
 **Best Practice:** Use `process.env.PORT` in both places to guarantee they match.
@@ -2730,6 +2748,7 @@ InngestModule.forRoot({
 **Root Cause:** You're using `app.setGlobalPrefix()` but didn't include it in the `path` configuration.
 
 **Diagnosis:**
+
 ```bash
 # If you set global prefix to 'api':
 curl http://localhost:3000/inngest        # ❌ 404
@@ -2746,12 +2765,12 @@ app.setGlobalPrefix('api');
 // module
 InngestModule.forRoot({
   path: 'inngest', // ❌ Will be at /inngest, but prefix makes it /api/inngest
-})
+});
 
 // ✓ CORRECT - Include global prefix:
 InngestModule.forRoot({
   path: 'api/inngest', // ✓ Explicitly include the prefix
-})
+});
 ```
 
 **Why this happens:** The `@Controller` decorator is applied before `setGlobalPrefix()` runs, so the module can't auto-detect it. This is standard NestJS behavior, consistent with packages like `@nestjs/swagger`.
@@ -2765,22 +2784,24 @@ InngestModule.forRoot({
 **Solutions:**
 
 **For Docker Compose:**
+
 ```typescript
 // Use Docker service names, not 'localhost'
 InngestModule.forRoot({
-  baseUrl: 'http://inngest:8288',     // Inngest service name
-  serveHost: 'app',                    // Your app's service name
+  baseUrl: 'http://inngest:8288', // Inngest service name
+  serveHost: 'app', // Your app's service name
   servePort: 3000,
-})
+});
 ```
 
 **For Kubernetes:**
+
 ```typescript
 // Use full K8s service DNS
 InngestModule.forRoot({
   serveHost: 'my-app-service.default.svc.cluster.local',
   servePort: 8080,
-})
+});
 
 // Or use environment variables (recommended):
 // Set in deployment YAML:
@@ -2788,6 +2809,7 @@ InngestModule.forRoot({
 ```
 
 **Debug checklist:**
+
 ```bash
 # From within the Inngest container/pod, can you reach your app?
 kubectl exec -it inngest-pod -- curl http://my-app-service:8080/inngest
@@ -2800,6 +2822,7 @@ kubectl exec -it inngest-pod -- curl http://my-app-service:8080/inngest
 **Problem:** Events are sent but functions aren't executing.
 
 **Solutions:**
+
 1. Verify event names match exactly (case-sensitive)
 2. Check event structure matches your function expectations
 3. Ensure the Inngest dev server is running
@@ -2828,6 +2851,7 @@ export class DebugService {
 **Problem:** Steps appear to run but don't produce expected results.
 
 **Solutions:**
+
 1. Add comprehensive logging within step functions
 2. Use try-catch blocks around step logic
 3. Return meaningful data from step functions for debugging
@@ -2837,7 +2861,7 @@ export class DebugService {
 @InngestEvent('debug-steps', 'debug.test')
 async debugSteps({ event, step }) {
   console.log('Function started with event:', event);
-  
+
   try {
     const result = await step.run('debug-step-1', async () => {
       console.log('Step 1 starting...');
@@ -2845,10 +2869,10 @@ async debugSteps({ event, step }) {
       console.log('Step 1 result:', data);
       return data;
     });
-    
+
     console.log('Step 1 completed:', result);
     return { success: true, result };
-    
+
   } catch (error) {
     console.error('Step failed:', error);
     throw error;
@@ -2861,6 +2885,7 @@ async debugSteps({ event, step }) {
 **Problem:** TypeScript errors with event types or step functions.
 
 **Solutions:**
+
 1. Define proper event interfaces
 2. Use type assertions carefully
 3. Enable strict type checking gradually
@@ -2878,12 +2903,12 @@ interface MyEvents {
 
 // Use typed context
 @InngestEvent('typed-function', 'user.created')
-async typedFunction({ 
-  event, 
-  step 
-}: { 
-  event: MyEvents['user.created']; 
-  step: any; 
+async typedFunction({
+  event,
+  step
+}: {
+  event: MyEvents['user.created'];
+  step: any;
 }) {
   // event.data is now fully typed
   const { userId, email, name } = event.data;
@@ -2912,11 +2937,11 @@ async efficientFunction({ event, step }) {
     const result2 = await process2();
     return { result1, result2 };
   });
-  
+
   const mainProcessing = await step.run('main-processing', async () => {
     return await processMain(preprocessing);
   });
-  
+
   return mainProcessing;
 }
 ```
@@ -2932,7 +2957,7 @@ async memoryEfficientFunction({ event, step }) {
   });
 
   const results = [];
-  
+
   for (let i = 0; i < chunks.length; i++) {
     const chunkResult = await step.run(`process-chunk-${i}`, async () => {
       const processed = await this.processChunk(chunks[i]);
@@ -2940,7 +2965,7 @@ async memoryEfficientFunction({ event, step }) {
       chunks[i] = null;
       return processed;
     });
-    
+
     results.push(chunkResult);
   }
 
@@ -2958,7 +2983,7 @@ InngestModule.forRoot({
   id: 'my-app',
   logger: process.env.NODE_ENV === 'development' ? console : undefined,
   // ... other config
-})
+});
 ```
 
 #### Use the Inngest Dev Server UI
@@ -2980,9 +3005,9 @@ export class MyService {
 
   @InngestEvent('logged-function', 'my.event')
   async loggedFunction({ event, step }) {
-    this.logger.log(`Processing event: ${event.name}`, { 
+    this.logger.log(`Processing event: ${event.name}`, {
       eventId: event.id,
-      data: event.data 
+      data: event.data,
     });
 
     const result = await step.run('logged-step', async () => {
@@ -3061,7 +3086,7 @@ npm run start:example:tracing
 ### Contribution Guidelines
 
 1. **Fork the repository** and create your feature branch
-2. **Write tests** for new features and bug fixes  
+2. **Write tests** for new features and bug fixes
 3. **Follow the existing code style** and conventions
 4. **Update documentation** for new features
 5. **Run the test suite** to ensure nothing breaks
@@ -3070,8 +3095,9 @@ npm run start:example:tracing
 ### Reporting Issues
 
 When reporting bugs, please include:
+
 - NestJS version
-- Node.js version  
+- Node.js version
 - nestjs-inngest version
 - Minimal reproduction case
 - Error messages and stack traces
@@ -3079,6 +3105,7 @@ When reporting bugs, please include:
 ### Feature Requests
 
 For new features, please:
+
 - Open an issue first to discuss the feature
 - Explain the use case and expected behavior
 - Consider implementation complexity and backwards compatibility
@@ -3090,7 +3117,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 - 📖 [Inngest Documentation](https://inngest.com/docs)
-- 💬 [Inngest Discord Community](https://discord.gg/inngest)  
+- 💬 [Inngest Discord Community](https://discord.gg/inngest)
 - 🐛 [Issues](https://github.com/nestjs-community/nestjs-inngest/issues)
 - 🚀 [Feature Requests](https://github.com/nestjs-community/nestjs-inngest/issues/new?template=feature_request.md)
 

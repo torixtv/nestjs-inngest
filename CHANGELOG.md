@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connect migration guide**: Added a dedicated serve-to-connect migration guide with rollout, health-check, and troubleshooting recommendations
+  - Covers dedicated worker deployment, gradual rollout, and rollback guidance
+  - Documents how to use `maxWorkerConcurrency`, `instanceId`, and `isolateExecution`
+  - Includes guidance for teams that previously saw `connect` workers drop or flap
+
+### Changed
+
+- **Inngest SDK**: Updated the supported `inngest` version to `3.52.6`
+  - Bumped both `devDependencies` and `peerDependencies`
+  - Updated public docs/examples to prefer `maxWorkerConcurrency`
+  - Added documentation for the SDK's `connect.isolateExecution` option
+
+### Fixed
+
+- **Connect health checks**: Updated `getConnectionHealth()` to match the current SDK's internal connection shape
+  - Supports current same-thread connections exposed via `workerConnection.strategy.core.currentConnection`
+  - Falls back cleanly to SDK state when `isolateExecution` uses the worker-thread strategy
+  - Avoids falsely reporting healthy isolated workers as dead simply because raw WebSocket internals are not available
+
+- **Connect configuration**: Added first-class support for newer connect options
+  - `connect.isolateExecution` is now typed, validated, and forwarded to the SDK
+  - Added environment variable support for `INNGEST_CONNECT_MAX_WORKER_CONCURRENCY`
+  - Added environment variable support for `INNGEST_CONNECT_ISOLATE_EXECUTION`
+  - Rejects the unsupported combination of `isolateExecution` with `rewriteGatewayEndpoint`
+
 ## [0.12.5] - 2026-01-19
 
 ### Fixed
@@ -54,6 +81,7 @@ The Inngest SDK's `extendProvider` behaviour requires `BasicTracerProvider` with
 NodeSDK wraps providers in `ProxyTracerProvider` which doesn't expose this method.
 
 Our approach:
+
 1. Use `behaviour: 'off'` for the middleware (provides `ctx.tracer` only)
 2. Manually add `InngestSpanProcessor` to `_activeSpanProcessor._spanProcessors`
 3. Processor constructor auto-registers in `clientProcessorMap`
@@ -106,6 +134,7 @@ Our approach:
 ### Technical Notes
 
 The Inngest SDK's tracing middleware has three behaviours:
+
 - `'extendProvider'`: Fails with NodeSDK's ProxyTracerProvider pattern
 - `'createProvider'`: Runs `trace.setGlobalTracerProvider()` - **replaces** existing provider
 - `'auto'`: Tries extend, falls back to create (same problem as create)

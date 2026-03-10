@@ -6,6 +6,53 @@ import { WebSocketReadyState } from '../src/interfaces';
 describe('InngestService.getConnectionHealth()', () => {
   let service: InngestService;
 
+  const createSameThreadWorkerConnection = ({
+    state = 'ACTIVE',
+    wsReadyState = WebSocketReadyState.OPEN,
+    pendingHeartbeats = 0,
+    hasWsReadyState = true,
+    currentConnection = true,
+  }: {
+    state?: string;
+    wsReadyState?: WebSocketReadyState;
+    pendingHeartbeats?: number;
+    hasWsReadyState?: boolean;
+    currentConnection?: boolean;
+  } = {}) => {
+    const connection =
+      currentConnection === false
+        ? null
+        : {
+            id: 'test-conn-id',
+            ws: hasWsReadyState ? { readyState: wsReadyState } : {},
+            pendingHeartbeats,
+          };
+
+    return {
+      state,
+      get connectionId() {
+        if (!connection) {
+          throw new Error('No connection');
+        }
+        return 'test-conn-id';
+      },
+      strategy: {
+        constructor: { name: 'SameThreadStrategy' },
+        core: {
+          currentConnection: connection,
+        },
+      },
+    };
+  };
+
+  const createWorkerThreadConnection = (state: string = 'ACTIVE') => ({
+    state,
+    connectionId: 'test-conn-id',
+    strategy: {
+      constructor: { name: 'WorkerThreadStrategy' },
+    },
+  });
+
   describe('serve mode', () => {
     beforeEach(async () => {
       const module: TestingModule = await Test.createTestingModule({
@@ -51,13 +98,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return unhealthy when currentConnection is null', () => {
-      // Mock workerConnection with null currentConnection
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        get connectionId() {
-          throw new Error('No connection');
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        currentConnection: false,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -66,15 +109,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return unhealthy when WebSocket is CLOSED', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.CLOSED },
-          pendingHeartbeats: 0,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        wsReadyState: WebSocketReadyState.CLOSED,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -84,15 +121,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return unhealthy when WebSocket is CONNECTING', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.CONNECTING },
-          pendingHeartbeats: 0,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        wsReadyState: WebSocketReadyState.CONNECTING,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -101,15 +132,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return unhealthy when pendingHeartbeats >= 2', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.OPEN },
-          pendingHeartbeats: 2,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        pendingHeartbeats: 2,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -118,15 +143,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return unhealthy when SDK state is not ACTIVE', () => {
-      (service as any).workerConnection = {
+      (service as any).workerConnection = createSameThreadWorkerConnection({
         state: 'RECONNECTING',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.OPEN },
-          pendingHeartbeats: 0,
-        },
-      };
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -135,15 +154,7 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return healthy when all checks pass', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.OPEN },
-          pendingHeartbeats: 0,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection();
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(true);
@@ -154,15 +165,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should return healthy when pendingHeartbeats is 1 (normal operation)', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: { readyState: WebSocketReadyState.OPEN },
-          pendingHeartbeats: 1,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        pendingHeartbeats: 1,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(true);
@@ -170,15 +175,9 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should fallback when wsReadyState is undefined', () => {
-      (service as any).workerConnection = {
-        state: 'ACTIVE',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: {}, // no readyState
-          pendingHeartbeats: 0,
-        },
-      };
+      (service as any).workerConnection = createSameThreadWorkerConnection({
+        hasWsReadyState: false,
+      });
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(true); // ACTIVE state means healthy in fallback
@@ -187,15 +186,29 @@ describe('InngestService.getConnectionHealth()', () => {
     });
 
     it('should fallback unhealthy when wsReadyState is undefined and state is not ACTIVE', () => {
-      (service as any).workerConnection = {
+      (service as any).workerConnection = createSameThreadWorkerConnection({
         state: 'RECONNECTING',
-        connectionId: 'test-conn-id',
-        currentConnection: {
-          id: 'test-conn-id',
-          ws: {}, // no readyState
-          pendingHeartbeats: 0,
-        },
-      };
+        hasWsReadyState: false,
+      });
+
+      const health = service.getConnectionHealth();
+      expect(health.isHealthy).toBe(false);
+      expect(health.usingInternalCheck).toBe(false);
+      expect(health.reason).toContain('RECONNECTING');
+    });
+
+    it('should fallback to state-only checks for isolateExecution worker-thread strategy', () => {
+      (service as any).workerConnection = createWorkerThreadConnection('ACTIVE');
+
+      const health = service.getConnectionHealth();
+      expect(health.isHealthy).toBe(true);
+      expect(health.usingInternalCheck).toBe(false);
+      expect(health.reason).toContain('worker-thread strategy');
+      expect(health.connectionId).toBe('test-conn-id');
+    });
+
+    it('should report unhealthy for isolateExecution worker-thread reconnecting state', () => {
+      (service as any).workerConnection = createWorkerThreadConnection('RECONNECTING');
 
       const health = service.getConnectionHealth();
       expect(health.isHealthy).toBe(false);
@@ -212,8 +225,13 @@ describe('InngestService.getConnectionHealth()', () => {
         get connectionId() {
           throw new Error('Test error');
         },
-        get currentConnection() {
-          throw new Error('Test error');
+        strategy: {
+          constructor: { name: 'SameThreadStrategy' },
+          core: {
+            get currentConnection() {
+              throw new Error('Test error');
+            },
+          },
         },
       };
 

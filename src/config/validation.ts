@@ -11,6 +11,7 @@ export const ConnectOptionsSchema = z
     maxWorkerConcurrency: z.number().min(1).optional(),
     handleShutdownSignals: z.array(z.string()).optional(),
     shutdownTimeout: z.number().min(1000).default(30000),
+    isolateExecution: z.boolean().optional(),
     // rewriteGatewayEndpoint is a function - allow any and validate at runtime
     rewriteGatewayEndpoint: z.function().optional(),
   })
@@ -302,14 +303,32 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     envConfig.connect.instanceId = instanceId;
   }
 
-  // Read maxConcurrency from INNGEST_MAX_CONCURRENCY
-  if (process.env.INNGEST_MAX_CONCURRENCY) {
-    const concurrency = parseInt(process.env.INNGEST_MAX_CONCURRENCY, 10);
+  // Read maxWorkerConcurrency from the current SDK env var, with legacy fallback
+  const maxWorkerConcurrencyEnv =
+    process.env.INNGEST_CONNECT_MAX_WORKER_CONCURRENCY || process.env.INNGEST_MAX_CONCURRENCY;
+
+  if (maxWorkerConcurrencyEnv) {
+    const concurrency = parseInt(maxWorkerConcurrencyEnv, 10);
     if (!isNaN(concurrency) && concurrency > 0) {
       if (!envConfig.connect) {
         envConfig.connect = {};
       }
-      envConfig.connect.maxConcurrency = concurrency;
+      if (process.env.INNGEST_CONNECT_MAX_WORKER_CONCURRENCY) {
+        envConfig.connect.maxWorkerConcurrency = concurrency;
+      } else {
+        envConfig.connect.maxConcurrency = concurrency;
+      }
+    }
+  }
+
+  // Read isolateExecution from INNGEST_CONNECT_ISOLATE_EXECUTION
+  if (process.env.INNGEST_CONNECT_ISOLATE_EXECUTION) {
+    const value = process.env.INNGEST_CONNECT_ISOLATE_EXECUTION.toLowerCase();
+    if (value === '1' || value === 'true' || value === '0' || value === 'false') {
+      if (!envConfig.connect) {
+        envConfig.connect = {};
+      }
+      envConfig.connect.isolateExecution = value === '1' || value === 'true';
     }
   }
 
@@ -341,7 +360,9 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
  *    - INNGEST_APP_VERSION or npm_package_version: Application version
  *    - INNGEST_MODE: Connection mode ('serve' or 'connect')
  *    - INNGEST_INSTANCE_ID: Worker instance ID (or auto-detected from HOSTNAME, FLY_MACHINE_ID, etc.)
- *    - INNGEST_MAX_CONCURRENCY: Maximum concurrent function executions
+ *    - INNGEST_CONNECT_MAX_WORKER_CONCURRENCY: Maximum concurrent worker executions
+ *    - INNGEST_MAX_CONCURRENCY: Legacy alias for maximum concurrent worker executions
+ *    - INNGEST_CONNECT_ISOLATE_EXECUTION: Enable worker-thread-based connect isolation
  *    - INNGEST_SHUTDOWN_TIMEOUT: Graceful shutdown timeout in milliseconds
  * 3. Package defaults
  */
