@@ -65,6 +65,18 @@ export interface InngestConnectOptions {
   rewriteGatewayEndpoint?: (url: string) => string;
 
   /**
+   * Run connect's WebSocket, heartbeat, and lease extension logic in a
+   * separate worker thread. This helps prevent blocked user code from
+   * impacting connection health.
+   *
+   * Note: When enabled, detailed WebSocket internals are not exposed by the
+   * SDK, so health checks fall back to SDK state instead of socket inspection.
+   *
+   * @since inngest v3.52.6
+   */
+  isolateExecution?: boolean;
+
+  /**
    * Graceful shutdown timeout in milliseconds.
    * After this timeout, the connection will be forcibly closed.
    * @default 30000
@@ -279,7 +291,8 @@ export interface InngestModuleOptions {
    *   mode: 'connect',
    *   connect: {
    *     instanceId: process.env.POD_NAME,
-   *     maxConcurrency: 10,
+   *     maxWorkerConcurrency: 10,
+   *     isolateExecution: true,
    *   },
    * })
    * ```

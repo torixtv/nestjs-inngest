@@ -7,19 +7,38 @@ import {
   OnApplicationShutdown,
   Optional,
 } from '@nestjs/common';
-import { Inngest, InngestFunction, EventPayload, GetEvents } from 'inngest';
+import {
+  Inngest,
+  InngestFunction,
+  EventPayload,
+  GetEvents,
+  version as inngestVersion,
+} from 'inngest';
 import { extendedTracesMiddleware, InngestSpanProcessor } from 'inngest/experimental';
 import { INNGEST_MODULE_OPTIONS } from '../constants';
-import { InngestModuleOptions, ConnectionHealthInfo, WebSocketReadyState } from '../interfaces';
+import {
+  InngestModuleOptions,
+  ConnectionHealthInfo,
+  InngestConnectOptions,
+  WebSocketReadyState,
+} from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
 import * as otelApi from '@opentelemetry/api';
 
 // Type for the WorkerConnection returned by connect()
 interface WorkerConnection {
   connectionId: string;
-  state: 'CONNECTING' | 'ACTIVE' | 'PAUSED' | 'RECONNECTING' | 'CLOSING' | 'CLOSED';
+  state: string;
   close: () => Promise<void>;
   closed: Promise<void>;
+}
+
+interface InternalCurrentConnection {
+  id?: string;
+  ws?: {
+    readyState?: number;
+  };
+  pendingHeartbeats?: number;
 }
 
 // Dynamic import holder for connect module
@@ -202,34 +221,12 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       this.logger.log('Establishing Inngest worker connection', {
         instanceId: connectOptions.instanceId,
         maxWorkerConcurrency: connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency,
+        isolateExecution: connectOptions.isolateExecution ?? false,
         handleShutdownSignals: connectOptions.handleShutdownSignals ?? 'default',
         functionCount: this.functions.length,
       });
 
-      // Build connect options, only including defined values
-      // Use maxWorkerConcurrency (SDK v3.45.1+), with fallback to deprecated maxConcurrency
-      const workerConcurrency =
-        connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
-      const connectConfig = {
-        apps: [
-          {
-            client: this.inngestClient,
-            functions: this.functions,
-          },
-        ],
-        ...(connectOptions.instanceId !== undefined && {
-          instanceId: connectOptions.instanceId,
-        }),
-        ...(workerConcurrency !== undefined && {
-          maxWorkerConcurrency: workerConcurrency,
-        }),
-        ...(connectOptions.handleShutdownSignals !== undefined && {
-          handleShutdownSignals: connectOptions.handleShutdownSignals,
-        }),
-        ...(connectOptions.rewriteGatewayEndpoint !== undefined && {
-          rewriteGatewayEndpoint: connectOptions.rewriteGatewayEndpoint,
-        }),
-      };
+      const connectConfig = this.buildConnectConfig(connectOptions);
 
       this.workerConnection = (await connect(connectConfig as any)) as WorkerConnection;
 
@@ -245,6 +242,40 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       });
       throw error;
     }
+  }
+
+  private buildConnectConfig(connectOptions: InngestConnectOptions) {
+    if (connectOptions.isolateExecution && connectOptions.rewriteGatewayEndpoint) {
+      throw new Error(
+        'connect.rewriteGatewayEndpoint is not supported when connect.isolateExecution is enabled',
+      );
+    }
+
+    const workerConcurrency = connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
+
+    return {
+      apps: [
+        {
+          client: this.inngestClient,
+          functions: this.functions,
+        },
+      ],
+      ...(connectOptions.instanceId !== undefined && {
+        instanceId: connectOptions.instanceId,
+      }),
+      ...(workerConcurrency !== undefined && {
+        maxWorkerConcurrency: workerConcurrency,
+      }),
+      ...(connectOptions.handleShutdownSignals !== undefined && {
+        handleShutdownSignals: connectOptions.handleShutdownSignals,
+      }),
+      ...(connectOptions.rewriteGatewayEndpoint !== undefined && {
+        rewriteGatewayEndpoint: connectOptions.rewriteGatewayEndpoint,
+      }),
+      ...(connectOptions.isolateExecution !== undefined && {
+        isolateExecution: connectOptions.isolateExecution,
+      }),
+    };
   }
 
   /**
@@ -508,7 +539,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   private testTracerSpanCreation(): void {
     try {
       // Use the same tracer name/version that Inngest SDK uses
-      const tracer = otelApi.trace.getTracer('inngest', '3.49.1');
+      const tracer = otelApi.trace.getTracer('inngest', inngestVersion);
 
       // Test 1: startSpan (what we tested before)
       const span1 = tracer.startSpan('test-span-startSpan');
@@ -851,20 +882,17 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * 3. `currentConnection.pendingHeartbeats` - Missed heartbeat count (≥2 = failing)
    *
    * Falls back gracefully to state-only check if SDK internals are inaccessible
-   * (e.g., if SDK internal structure changes in a future version).
-   *
-   * ## SDK Compatibility
-   * Tested and compatible with inngest SDK v3.40.2 - v3.49.1.
+   * (e.g., if SDK internal structure changes or isolateExecution uses worker threads).
    *
    * Internal properties accessed (not part of public API):
-   * - `workerConnection.currentConnection` - Active connection wrapper
+   * - Older SDKs: `workerConnection.currentConnection`
+   * - Current same-thread SDKs: `workerConnection.strategy.core.currentConnection`
    * - `currentConnection.ws.readyState` - Node.js WebSocket state (0-3)
    * - `currentConnection.pendingHeartbeats` - Missed heartbeat counter
    *
    * If SDK internals change in future versions, this method falls back
    * gracefully to state-only checking with `usingInternalCheck: false`.
    *
-   * @see https://github.com/inngest/inngest-js/blob/v3.49.1/packages/inngest/src/components/connect/index.ts
    * @returns ConnectionHealthInfo with detailed health status
    */
   getConnectionHealth(): ConnectionHealthInfo {
@@ -897,13 +925,26 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
 
     // Try to access SDK internals for accurate health
     try {
-      // Cast to any to access internal properties
+      const currentConnection = this.resolveInternalCurrentConnection();
 
-      const conn = this.workerConnection as any;
-      const currentConnection = conn?.currentConnection;
+      if (!currentConnection.supported) {
+        const isHealthy = sdkState === activeState;
+        return {
+          isHealthy,
+          reason: isHealthy
+            ? `Connection appears active (${currentConnection.reason})`
+            : `Connection state is ${sdkState} (${currentConnection.reason})`,
+          sdkState,
+          wsReadyState: null,
+          wsStateName: null,
+          pendingHeartbeats: null,
+          connectionId,
+          usingInternalCheck: false,
+        };
+      }
 
       // Check 1: If currentConnection is null/undefined, connection is dead
-      if (!currentConnection) {
+      if (!currentConnection.currentConnection) {
         return {
           isHealthy: false,
           reason: 'No active connection (currentConnection is null)',
@@ -917,7 +958,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       }
 
       // Check 2: WebSocket readyState - the ground truth
-      const ws = currentConnection.ws;
+      const ws = currentConnection.currentConnection.ws;
       const wsReadyState: number | undefined = ws?.readyState;
 
       // If wsReadyState is not accessible, fall back to state-only mode
@@ -932,7 +973,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
           wsReadyState: null,
           wsStateName: null,
           pendingHeartbeats: null,
-          connectionId: currentConnection.id ?? connectionId,
+          connectionId: currentConnection.currentConnection.id ?? connectionId,
           usingInternalCheck: false,
         };
       }
@@ -947,14 +988,15 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
           sdkState,
           wsReadyState,
           wsStateName,
-          pendingHeartbeats: currentConnection.pendingHeartbeats ?? null,
-          connectionId: currentConnection.id ?? connectionId,
+          pendingHeartbeats: currentConnection.currentConnection.pendingHeartbeats ?? null,
+          connectionId: currentConnection.currentConnection.id ?? connectionId,
           usingInternalCheck: true,
         };
       }
 
       // Check 3: Pending heartbeats - if ≥2, heartbeats are failing
-      const pendingHeartbeats: number | undefined = currentConnection.pendingHeartbeats;
+      const pendingHeartbeats: number | undefined =
+        currentConnection.currentConnection.pendingHeartbeats;
       if (typeof pendingHeartbeats === 'number' && pendingHeartbeats >= 2) {
         return {
           isHealthy: false,
@@ -963,7 +1005,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
           wsReadyState: wsReadyState ?? null,
           wsStateName,
           pendingHeartbeats,
-          connectionId: currentConnection.id ?? connectionId,
+          connectionId: currentConnection.currentConnection.id ?? connectionId,
           usingInternalCheck: true,
         };
       }
@@ -977,7 +1019,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
           wsReadyState: wsReadyState ?? null,
           wsStateName,
           pendingHeartbeats: pendingHeartbeats ?? null,
-          connectionId: currentConnection.id ?? connectionId,
+          connectionId: currentConnection.currentConnection.id ?? connectionId,
           usingInternalCheck: true,
         };
       }
@@ -990,7 +1032,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         wsReadyState: wsReadyState ?? null,
         wsStateName,
         pendingHeartbeats: pendingHeartbeats ?? null,
-        connectionId: currentConnection.id ?? connectionId,
+        connectionId: currentConnection.currentConnection.id ?? connectionId,
         usingInternalCheck: true,
       };
     } catch (error) {
@@ -1020,6 +1062,51 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         usingInternalCheck: false,
       };
     }
+  }
+
+  private resolveInternalCurrentConnection():
+    | { supported: true; currentConnection: InternalCurrentConnection | null | undefined }
+    | { supported: false; reason: string } {
+    const conn = this.workerConnection as any;
+
+    if (!conn) {
+      return { supported: false, reason: 'worker connection is not initialized' };
+    }
+
+    if ('currentConnection' in conn) {
+      return { supported: true, currentConnection: conn.currentConnection };
+    }
+
+    const strategy = conn.strategy;
+    const strategyName = strategy?.constructor?.name;
+
+    if (strategy?.core) {
+      if ('currentConnection' in strategy.core) {
+        return {
+          supported: true,
+          currentConnection: strategy.core.currentConnection,
+        };
+      }
+
+      if ('connection' in strategy.core) {
+        return {
+          supported: true,
+          currentConnection: strategy.core.connection,
+        };
+      }
+    }
+
+    if (this.options.connect?.isolateExecution || strategyName === 'WorkerThreadStrategy') {
+      return {
+        supported: false,
+        reason: 'worker-thread strategy does not expose WebSocket internals',
+      };
+    }
+
+    return {
+      supported: false,
+      reason: 'SDK internals are not accessible',
+    };
   }
 
   /**

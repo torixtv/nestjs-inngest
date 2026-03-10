@@ -143,4 +143,42 @@ describe('InngestService', () => {
       expect(eventResult).toBeNull();
     });
   });
+
+  describe('buildConnectConfig', () => {
+    it('should map maxConcurrency to maxWorkerConcurrency for the SDK', () => {
+      const connectConfig = (service as any).buildConnectConfig({
+        instanceId: 'worker-1',
+        maxConcurrency: 4,
+      });
+
+      expect(connectConfig).toMatchObject({
+        instanceId: 'worker-1',
+        maxWorkerConcurrency: 4,
+        apps: [{ client: service.getClient(), functions: [] }],
+      });
+    });
+
+    it('should forward isolateExecution to the SDK connect config', () => {
+      const connectConfig = (service as any).buildConnectConfig({
+        maxWorkerConcurrency: 2,
+        isolateExecution: true,
+      });
+
+      expect(connectConfig).toMatchObject({
+        maxWorkerConcurrency: 2,
+        isolateExecution: true,
+      });
+    });
+
+    it('should reject rewriteGatewayEndpoint when isolateExecution is enabled', () => {
+      expect(() =>
+        (service as any).buildConnectConfig({
+          isolateExecution: true,
+          rewriteGatewayEndpoint: (url: string) => url,
+        }),
+      ).toThrow(
+        'connect.rewriteGatewayEndpoint is not supported when connect.isolateExecution is enabled',
+      );
+    });
+  });
 });
