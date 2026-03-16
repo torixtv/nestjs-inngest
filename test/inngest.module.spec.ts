@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { HttpStatus } from '@nestjs/common';
 import { InngestModule } from '../src/module/inngest.module';
 import { InngestService } from '../src/services/inngest.service';
+import { InngestController } from '../src/services/inngest.controller';
 import { InngestModuleOptions, InngestOptionsFactory } from '../src/interfaces';
 import { Injectable } from '@nestjs/common';
 
@@ -288,6 +290,39 @@ describe('InngestModule', () => {
       const mergedOptions = service.getOptions();
 
       expect(mergedOptions.connect?.handleShutdownSignals).toEqual([]);
+
+      await module.close();
+    });
+
+    it('should return 404 from serve handler when forRootAsync uses connect mode', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        imports: [
+          InngestModule.forRootAsync({
+            useFactory: () => ({
+              id: 'connect-async-app',
+              mode: 'connect' as const,
+              disableAutoRegistration: true,
+            }),
+          }),
+        ],
+      }).compile();
+
+      const controller = module.get(InngestController);
+      expect(controller).toBeDefined();
+
+      // Verify handler returns 404 in connect mode
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn().mockReturnThis(),
+      };
+      controller.handler({} as any, mockRes as any);
+
+      expect(mockRes.status).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: 'Not available',
+        }),
+      );
 
       await module.close();
     });
