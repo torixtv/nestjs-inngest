@@ -19,6 +19,19 @@ export function createInngestController(path: string = 'inngest') {
 
     public initializeHandler() {
       const options = this.inngestService.getOptions();
+
+      // In connect mode, don't initialize serve handler — functions are invoked via WebSocket
+      if (options.mode === 'connect') {
+        this.handler = (_req: Request, res: Response) => {
+          res.status(HttpStatus.NOT_FOUND).json({
+            error: 'Not available',
+            message: 'This app uses Inngest Connect mode. Serve endpoints are disabled.',
+          });
+        };
+        this.logger.log('Connect mode detected — serve handler disabled');
+        return;
+      }
+
       const functions = this.inngestService.getFunctions();
       const client = this.inngestService.getClient();
 
