@@ -9,7 +9,7 @@ import {
   RateLimit,
   Retries
 } from '../../src';
-import { InngestMiddleware } from 'inngest';
+import { Middleware } from 'inngest';
 import { createUserEvent } from '../../src/utils/types';
 
 // Define your event types for better type safety
@@ -34,60 +34,51 @@ interface UserEvents {
   };
 }
 
-// Test middleware for integration testing
-const loggingMiddleware = new InngestMiddleware({
-  name: "Request Logging",
-  init: () => {
-    console.log('🔧 Logging middleware initialized');
-    return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`🚀 [MIDDLEWARE] Starting function: ${fn.id()}`);
-            console.log(`📦 [MIDDLEWARE] Event data:`, JSON.stringify(ctx.event, null, 2));
-            
-            // Add middleware metadata to context
-            (ctx as any).middlewareExecuted = (ctx as any).middlewareExecuted || [];
-            (ctx as any).middlewareExecuted.push('logging');
-            
-            return { ctx, function: fn, steps };
-          }
-        };
-      }
-    };
-  }
-});
+class LoggingMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'request-logging';
 
-const validationMiddleware = new InngestMiddleware({
-  name: "Event Validation",
-  init: () => {
-    console.log('🔧 Validation middleware initialized');
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`🚀 [MIDDLEWARE] Starting function: ${arg.fn.id()}`);
+    console.log(`📦 [MIDDLEWARE] Event data:`, JSON.stringify(arg.ctx.event, null, 2));
+
     return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`🔍 [MIDDLEWARE] Validating event for function: ${fn.id()}`);
-            
-            // Add validation logic
-            if (!ctx.event.data) {
-              throw new Error('Event data is required');
-            }
-            
-            // Add middleware metadata to context
-            (ctx as any).middlewareExecuted = (ctx as any).middlewareExecuted || [];
-            (ctx as any).middlewareExecuted.push('validation');
-            
-            // Add validation info
-            (ctx as any).validatedAt = new Date().toISOString();
-            
-            console.log(`✅ [MIDDLEWARE] Event validated successfully`);
-            return { ctx, function: fn, steps };
-          }
-        };
-      }
+      ...arg,
+      ctx: {
+        ...arg.ctx,
+        middlewareExecuted: [
+          ...(((arg.ctx as any).middlewareExecuted as string[] | undefined) || []),
+          'logging',
+        ],
+      } as typeof arg.ctx,
     };
   }
-});
+}
+
+class ValidationMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'event-validation';
+
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`🔍 [MIDDLEWARE] Validating event for function: ${arg.fn.id()}`);
+
+    if (!arg.ctx.event.data) {
+      throw new Error('Event data is required');
+    }
+
+    console.log(`✅ [MIDDLEWARE] Event validated successfully`);
+
+    return {
+      ...arg,
+      ctx: {
+        ...arg.ctx,
+        middlewareExecuted: [
+          ...(((arg.ctx as any).middlewareExecuted as string[] | undefined) || []),
+          'validation',
+        ],
+        validatedAt: new Date().toISOString(),
+      } as typeof arg.ctx,
+    };
+  }
+}
 
 @Injectable()
 export class UserService {
@@ -99,7 +90,7 @@ export class UserService {
   @InngestFunction({
     id: 'onboard-new-user',
     name: 'Onboard New User',
-    trigger: { event: 'user.created' },
+    triggers: { event: 'user.created' },
   })
   @Concurrency(5) // Limit to 5 concurrent executions
   async onboardNewUser({ event, step }: { event: UserEvents['user.created']; step: any }) {
@@ -230,9 +221,9 @@ export class UserService {
   @InngestFunction({
     id: 'middleware-test-function',
     name: 'Test Function with Middleware',
-    trigger: { event: 'test.middleware' },
+    triggers: { event: 'test.middleware' },
   })
-  @UseMiddleware(loggingMiddleware, validationMiddleware)
+  @UseMiddleware(LoggingMiddleware, ValidationMiddleware)
   @Retries(2)
   @Concurrency(3)
   async testMiddleware({ event, step, ctx }: { event: any; step: any; ctx: any }) {

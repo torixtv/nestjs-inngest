@@ -21,7 +21,7 @@ export class PaymentService {
 
   @InngestFunction({
     id: 'process-payment',
-    trigger: { event: 'order.payment.required' }
+    triggers: { event: 'order.payment.required' }
   })
   async processPayment(event: OrderPaymentEvent, step: any) {
     const { orderId, customerId, totalAmount, paymentMethod } = event.data;
@@ -40,7 +40,8 @@ export class PaymentService {
       );
 
       // Continue to inventory check
-      await step.sendEvent('order.inventory.check', {
+      await step.sendEvent('send-order-inventory-check', {
+        name: 'order.inventory.check',
         data: {
           ...event.data,
           transactionId: paymentResult.transactionId
@@ -58,7 +59,8 @@ export class PaymentService {
       );
 
       // Handle payment failure
-      await step.sendEvent('order.payment.failed', {
+      await step.sendEvent('send-order-payment-failed', {
+        name: 'order.payment.failed',
         data: {
           orderId,
           customerId,

@@ -38,7 +38,7 @@ export class InventoryService {
 
   @InngestFunction({
     id: 'check-inventory',
-    trigger: { event: 'order.inventory.check' }
+    triggers: { event: 'order.inventory.check' }
   })
   async checkInventory(event: OrderInventoryEvent, step: any) {
     const { orderId, items, transactionId } = event.data;
@@ -59,7 +59,8 @@ export class InventoryService {
       );
 
       // Send inventory failure event
-      await step.sendEvent('order.inventory.insufficient', {
+      await step.sendEvent('send-order-inventory-insufficient', {
+        name: 'order.inventory.insufficient',
         data: {
           orderId,
           transactionId,
@@ -83,7 +84,8 @@ export class InventoryService {
       this.logger.log(`Items reserved for order ${orderId}`);
 
       // Continue to fulfillment
-      await step.sendEvent('order.fulfillment.ready', {
+      await step.sendEvent('send-order-fulfillment-ready', {
+        name: 'order.fulfillment.ready',
         data: {
           ...event.data,
           reservationId: `rsv_${orderId}_${Date.now()}`
@@ -98,7 +100,8 @@ export class InventoryService {
     } else {
       this.logger.error(`Failed to reserve items for order ${orderId}`);
 
-      await step.sendEvent('order.inventory.reservation_failed', {
+      await step.sendEvent('send-order-reservation-failed', {
+        name: 'order.inventory.reservation_failed',
         data: { orderId, transactionId, reason: 'Reservation system error' }
       });
 

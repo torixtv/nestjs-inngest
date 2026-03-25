@@ -51,7 +51,7 @@ export class NotificationService {
   @InngestFunction({
     id: 'send-email-notification',
     name: 'Send Email Notification',
-    trigger: { event: 'notification.email.send' },
+    triggers: { event: 'notification.email.send' },
   })
   @Throttle(50, '1m') // Max 50 emails per minute with burst support
   @Debounce('2s', 'event.data.to') // Debounce by recipient email for 2 seconds
@@ -204,7 +204,7 @@ export class NotificationService {
   @InngestFunction({
     id: 'process-notification-batch',
     name: 'Process Notification Batch',
-    trigger: { event: 'notification.batch.process' },
+    triggers: { event: 'notification.batch.process' },
     batchEvents: {
       maxSize: 10, // Process up to 10 batch events at once
       timeout: '5m', // Wait max 5 minutes to collect batch

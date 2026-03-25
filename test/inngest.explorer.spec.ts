@@ -15,7 +15,7 @@ describe('InngestExplorer', () => {
   class TestService {
     @InngestFunction({
       id: 'test-function',
-      trigger: { event: 'test.event' },
+      triggers: [{ event: 'test.event' }],
     })
     async handleTestEvent(context: { event: any; step: any; ctx: any }) {
       return { success: true, data: context.event.data };
@@ -23,7 +23,7 @@ describe('InngestExplorer', () => {
 
     @InngestFunction({
       id: 'another-function',
-      trigger: { cron: '0 0 * * *' },
+      triggers: [{ cron: '0 0 * * *' }],
     })
     async handleScheduled(context: { event: any; step: any; ctx: any }) {
       return { scheduled: true };

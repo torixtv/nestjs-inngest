@@ -179,7 +179,7 @@ describe('InngestModule', () => {
         mode: 'connect',
         connect: {
           instanceId: 'test-worker-1',
-          maxConcurrency: 5,
+          maxWorkerConcurrency: 5,
           shutdownTimeout: 60000,
         },
       };
@@ -194,7 +194,7 @@ describe('InngestModule', () => {
       const mergedOptions = service.getOptions();
       expect(mergedOptions.mode).toBe('connect');
       expect(mergedOptions.connect?.instanceId).toBe('test-worker-1');
-      expect(mergedOptions.connect?.maxConcurrency).toBe(5);
+      expect(mergedOptions.connect?.maxWorkerConcurrency).toBe(5);
       expect(mergedOptions.connect?.shutdownTimeout).toBe(60000);
 
       await module.close();

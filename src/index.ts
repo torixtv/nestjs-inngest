@@ -23,6 +23,15 @@ export {
   Throttle,
   Debounce,
   Retries,
+  BatchEvents,
+  CancelOn,
+  Singleton,
+  Priority,
+  Idempotency,
+  Timeouts,
+  OptimizeParallelism,
+  Checkpointing,
+  OnFailure,
 } from './decorators/inngest-middleware.decorator';
 
 // Note: @Traced decorator removed - tracing is now automatic via middleware
@@ -102,11 +111,24 @@ export type {
   Inngest,
   InngestFunction as InngestFunctionType,
   EventPayload,
-  GetEvents,
   GetFunctionInput,
+  GetFunctionOutput,
   Context as InngestContext,
   GetStepTools,
-  InngestMiddleware,
+  Middleware,
+} from 'inngest';
+
+export {
+  eventType,
+  cron,
+  invoke,
+  staticSchema,
+  referenceFunction,
+  group,
+  step,
+  NonRetriableError,
+  RetryAfterError,
+  StepError,
 } from 'inngest';
 
 // Re-export ConnectionState enum from inngest/connect for type-safe state comparisons

@@ -20,7 +20,7 @@ export class FulfillmentService {
 
   @InngestFunction({
     id: 'fulfill-order',
-    trigger: { event: 'order.fulfillment.ready' }
+    triggers: { event: 'order.fulfillment.ready' }
   })
   async fulfillOrder(event: OrderFulfillmentEvent, step: any) {
     const { orderId, customerId, shippingAddress, items, reservationId } = event.data;
@@ -44,7 +44,8 @@ export class FulfillmentService {
     });
 
     // Send confirmation notification
-    await step.sendEvent('order.confirmation.send', {
+    await step.sendEvent('send-order-confirmation', {
+      name: 'order.confirmation.send',
       data: {
         orderId,
         customerId,

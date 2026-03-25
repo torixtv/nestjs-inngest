@@ -1,9 +1,9 @@
-import { EventPayload, GetEvents, Inngest } from 'inngest';
+import { EventPayload } from 'inngest';
 
 /**
- * Helper type to extract event types from an Inngest client
+ * @deprecated Inngest v4 no longer exposes centralized client event maps.
  */
-export type ExtractEvents<T extends Inngest<any>> = T extends Inngest<infer E> ? E : never;
+export type ExtractEvents<T = never> = never;
 
 /**
  * Helper type for function return values

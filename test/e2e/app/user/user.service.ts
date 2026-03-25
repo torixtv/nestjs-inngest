@@ -34,7 +34,7 @@ export class UserService {
   @InngestFunction({
     id: 'user-onboarding-workflow',
     name: 'User Onboarding Workflow',
-    trigger: { event: 'user.created' },
+    triggers: { event: 'user.created' },
   })
   @Concurrency(5) // Process max 5 onboarding workflows concurrently
   @Retries(3) // Retry up to 3 times on failure

@@ -15,7 +15,7 @@ export class TaskService {
   // Complex workflow with multiple steps and error handling
   @InngestFunction({
     id: 'process-data-pipeline',
-    trigger: { event: 'data.pipeline.start' },
+    triggers: { event: 'data.pipeline.start' },
   })
   @Retries(3)
   async processDataPipeline({ event, step }: { event: any; step: any }) {

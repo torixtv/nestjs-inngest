@@ -7,7 +7,7 @@ import {
   INNGEST_HANDLER_METADATA,
   INNGEST_MIDDLEWARE_METADATA,
 } from '../constants';
-import { InngestFunctionMetadata } from '../interfaces';
+import { InngestFunctionConfig, InngestFunctionMetadata } from '../interfaces';
 
 @Injectable()
 export class InngestExplorer implements OnModuleInit {
@@ -68,6 +68,26 @@ export class InngestExplorer implements OnModuleInit {
     return functionCount;
   }
 
+  private resolveOnFailureHandler(
+    instance: any,
+    prototype: any,
+    methodName: string,
+    onFailureMethod?: string | symbol,
+  ) {
+    if (!onFailureMethod) {
+      return undefined;
+    }
+
+    const failureHandler = prototype[onFailureMethod];
+    if (typeof failureHandler !== 'function') {
+      throw new Error(
+        `@OnFailure on ${methodName} references missing method "${String(onFailureMethod)}"`,
+      );
+    }
+
+    return failureHandler.bind(instance);
+  }
+
   private async registerFunction(
     instance: any,
     prototype: any,
@@ -105,17 +125,26 @@ export class InngestExplorer implements OnModuleInit {
         target,
         propertyKey,
         config: metadataConfig,
+        onFailureMethod,
         ...middlewareProperties
       } = functionMetadata;
+      const onFailure = this.resolveOnFailureHandler(
+        instance,
+        prototype,
+        methodName,
+        onFailureMethod,
+      );
+      const configMiddleware = config.middleware || [];
+      const functionMiddleware = [...configMiddleware, ...middlewareFromDecorator];
 
-      const fullConfig = {
+      const fullConfig: InngestFunctionConfig = {
         id: config.id || `${instance.constructor.name}.${methodName}`,
         name: config.name || methodName,
         ...config,
         // Apply all middleware decorator properties generically
         ...middlewareProperties,
-        // Add function-level middleware from @UseMiddleware decorator
-        ...(middlewareFromDecorator.length > 0 && { middleware: middlewareFromDecorator }),
+        ...(functionMiddleware.length > 0 && { middleware: functionMiddleware }),
+        ...(onFailure && { onFailure }),
       };
 
       // Create the Inngest function with proper binding and monitoring
@@ -200,8 +229,9 @@ export class InngestExplorer implements OnModuleInit {
       // Register function with monitoring service for tracking
       if (this.monitoringService) {
         try {
+          const configuredFunctionId = fullConfig.id || `${instance.constructor.name}.${methodName}`;
           this.monitoringService.registerFunction(
-            fullConfig.id, // Use the configured ID instead of inngestFunction.id
+            configuredFunctionId,
             fullConfig.name || methodName,
             fullConfig,
           );

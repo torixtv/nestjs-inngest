@@ -15,6 +15,12 @@ This guide explains how the Inngest decorators work technically, how function re
 
 The NestJS Inngest integration uses TypeScript decorators to automatically discover and register Inngest functions within your NestJS application. The decorators work by storing metadata on class methods, which is then read during application startup to create and register Inngest functions.
 
+This guide reflects the Inngest v4 SDK integration:
+
+- Function config uses `triggers`, not `trigger`
+- Function middleware uses `Middleware.BaseMiddleware` classes, not `InngestMiddleware`
+- Decorators now cover newer v4 execution controls such as batching, cancellation, singleton execution, timeouts, idempotency, checkpointing, and failure handlers
+
 ## Core Decorators
 
 ### `@InngestFunction(config)`
@@ -25,7 +31,7 @@ The primary decorator that marks a method as an Inngest function.
 @InngestFunction({
   id: 'my-function',
   name: 'My Function',
-  trigger: { event: 'user.created' },
+  triggers: { event: 'user.created' },
 })
 async myFunction({ event, step }: { event: any; step: any }) {
   // Function logic here
@@ -35,7 +41,7 @@ async myFunction({ event, step }: { event: any; step: any }) {
 **Parameters:**
 - `id`: Unique identifier for the function
 - `name`: Display name (optional)
-- `trigger`: Event trigger or cron trigger configuration
+- `triggers`: One trigger or an array of event/cron triggers
 - Additional Inngest configuration options
 
 ### `@InngestEvent(id, event, options?)`
@@ -79,7 +85,7 @@ These decorators add execution policies to your Inngest functions.
 Sets the number of retry attempts on function failure.
 
 ```typescript
-@InngestFunction({ id: 'my-function', trigger: { event: 'test' } })
+@InngestFunction({ id: 'my-function', triggers: { event: 'test' } })
 @Retries(3) // Will retry up to 3 times
 async myFunction({ event, step }) {
   // Function logic
@@ -91,7 +97,7 @@ async myFunction({ event, step }) {
 Controls how many instances of the function can run concurrently.
 
 ```typescript
-@InngestFunction({ id: 'my-function', trigger: { event: 'test' } })
+@InngestFunction({ id: 'my-function', triggers: { event: 'test' } })
 @Concurrency(5) // Max 5 concurrent executions
 async myFunction({ event, step }) {
   // Function logic
@@ -116,7 +122,7 @@ async processUser({ event, step }) {
 Limits the rate of function execution.
 
 ```typescript
-@InngestFunction({ id: 'send-email', trigger: { event: 'email.send' } })
+@InngestFunction({ id: 'send-email', triggers: { event: 'email.send' } })
 @RateLimit(100, '1m') // Max 100 executions per minute
 async sendEmail({ event, step }) {
   // Email sending logic
@@ -134,7 +140,7 @@ async processUserAction({ event, step }) {
 Smooths out function execution over time.
 
 ```typescript
-@InngestFunction({ id: 'api-call', trigger: { event: 'api.request' } })
+@InngestFunction({ id: 'api-call', triggers: { event: 'api.request' } })
 @Throttle(50, '1m', { burst: 10 }) // 50 per minute, allow 10 burst
 async makeApiCall({ event, step }) {
   // API call logic
@@ -150,7 +156,7 @@ async makeApiCall({ event, step }) {
 Prevents rapid successive executions by waiting for a quiet period.
 
 ```typescript
-@InngestFunction({ id: 'save-draft', trigger: { event: 'draft.updated' } })
+@InngestFunction({ id: 'save-draft', triggers: { event: 'draft.updated' } })
 @Debounce('5s', 'event.data.documentId') // Wait 5 seconds of quiet per document
 async saveDraft({ event, step }) {
   // Save draft logic - only executes after 5s of no new events
@@ -162,19 +168,16 @@ async saveDraft({ event, step }) {
 Adds custom Inngest middleware to function execution. This applies function-level middleware that runs before the function handler.
 
 ```typescript
-// Define middleware instances
-const authMiddleware = new InngestMiddleware({
-  name: "Authentication",
-  init: () => ({ /* middleware init */ }),
-});
+class AuthMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'auth';
+}
 
-const loggingMiddleware = new InngestMiddleware({
-  name: "Logging", 
-  init: () => ({ /* middleware init */ }),
-});
+class LoggingMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'logging';
+}
 
-@InngestFunction({ id: 'my-function', trigger: { event: 'test' } })
-@UseMiddleware(authMiddleware, loggingMiddleware)
+@InngestFunction({ id: 'my-function', triggers: { event: 'test' } })
+@UseMiddleware(AuthMiddleware, LoggingMiddleware)
 async myFunction({ event, step }) {
   // Function with custom middleware that runs before this handler
 }
@@ -309,25 +312,32 @@ async registerFunction(instance: any, prototype: any, methodName: string) {
 }
 ```
 
+### Additional v4 Decorators
+
+```typescript
+@InngestFunction({ id: 'process-batch', triggers: { event: 'notification.batch' } })
+@BatchEvents(50, '30s', { key: 'event.data.accountId', if: 'event.data.enabled == true' })
+@CancelOn({ event: 'notification.batch.cancelled', match: 'data.accountId' })
+@Singleton({ mode: 'skip', key: 'event.data.accountId' })
+@Priority('event.data.priority')
+@Idempotency('event.data.requestId')
+@Timeouts({ start: '5m', finish: '30m' })
+@OptimizeParallelism()
+@Checkpointing({ maxRuntime: '2h', bufferedSteps: 20 })
+@OnFailure('handleFailure')
+async processBatch({ events, step }) {
+  // ...
+}
+```
+
 ### 4. Inngest Function Creation
 
 The `InngestService.createFunction()` method:
 
 ```typescript
 createFunction(options: any, handler: any) {
-  // Extract trigger configuration for Inngest v3 API
-  const { trigger, triggers, ...fnOptions } = options;
-  
-  let triggerConfig = trigger;
-  if (!triggerConfig && triggers) {
-    triggerConfig = triggers[0] || triggers;
-  }
-  if (!triggerConfig && options.event) {
-    triggerConfig = { event: options.event };
-  }
-  
-  // Create function using Inngest v3 API: createFunction(options, trigger, handler)
-  const fn = this.inngestClient.createFunction(fnOptions, triggerConfig, handler);
+  // Inngest v4 accepts the trigger configuration inside options.triggers
+  const fn = this.inngestClient.createFunction(options, handler);
   this.registerFunction(fn);
   return fn;
 }
@@ -343,7 +353,7 @@ export class UserService {
   @InngestFunction({
     id: 'welcome-user',
     name: 'Send Welcome Email',
-    trigger: { event: 'user.registered' }
+    triggers: { event: 'user.registered' }
   })
   @Retries(3)
   async sendWelcomeEmail({ event, step }) {
@@ -462,7 +472,7 @@ The following decorators have been removed in favor of cleaner alternatives:
 
 **Before:**
 ```typescript
-@InngestFunction({ id: 'my-function', trigger: { event: 'test' } })
+@InngestFunction({ id: 'my-function', triggers: { event: 'test' } })
 async myFunction(@Event() event: any, @Step() step: any, @Context() ctx: any) {
   // Function logic
 }
@@ -470,7 +480,7 @@ async myFunction(@Event() event: any, @Step() step: any, @Context() ctx: any) {
 
 **After (Recommended):**
 ```typescript
-@InngestFunction({ id: 'my-function', trigger: { event: 'test' } })
+@InngestFunction({ id: 'my-function', triggers: { event: 'test' } })
 async myFunction({ event, step, ctx }) {
   // Function logic - cleaner and more straightforward
 }

@@ -34,7 +34,7 @@ export class NotificationService {
 
   @InngestFunction({
     id: 'send-order-confirmation',
-    trigger: { event: 'order.confirmation.send' }
+    triggers: { event: 'order.confirmation.send' }
   })
   async sendOrderConfirmation(event: OrderConfirmationEvent, step: any) {
     const { orderId, customerId, trackingNumber, carrier, estimatedDelivery, items } = event.data;

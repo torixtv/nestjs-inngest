@@ -7,28 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-25
+
 ### Added
 
-- **Connect migration guide**: Added a dedicated serve-to-connect migration guide with rollout, health-check, and troubleshooting recommendations
-  - Covers dedicated worker deployment, gradual rollout, and rollback guidance
-  - Documents how to use `maxWorkerConcurrency`, `instanceId`, and `isolateExecution`
-  - Includes guidance for teams that previously saw `connect` workers drop or flap
+- **Decorator-first v4 parity**:
+  - Added `@BatchEvents`, `@CancelOn`, `@Singleton`, `@Priority`, `@Idempotency`, `@Timeouts`, `@OptimizeParallelism`, `@Checkpointing`, and `@OnFailure`
+  - Expanded `@Concurrency` to support numeric, object, and multi-rule array forms
+  - Expanded `@Debounce` to support `timeout`
+  - Added support for `batchEvents.key` and `batchEvents.if`
+  - Added `signingKeyFallback` module support for key rotation
+
+- **Updated public docs**:
+  - Rewrote the README for the `1.0.0` / Inngest v4 release
+  - Added a consumer-focused migration guide from `0.x` to `1.0.0`
+  - Documented the v4 middleware model, renamed config fields, and new decorators
 
 ### Changed
 
-- **Inngest SDK**: Updated the supported `inngest` version to `3.52.6`
-  - Bumped both `devDependencies` and `peerDependencies`
-  - Updated public docs/examples to prefer `maxWorkerConcurrency`
-  - Added documentation for the SDK's `connect.isolateExecution` option
+- **Breaking: aligned the package with Inngest v4**:
+  - Upgraded supported `inngest` version to `^4.0.5`
+  - Added `engines.node >=20`
+  - Renamed `trigger` to `triggers`
+  - Renamed `serveHost` to `serveOrigin`
+  - Renamed `rewriteGatewayEndpoint` to `gatewayUrl`
+  - Replaced `connect.maxConcurrency` with `connect.maxWorkerConcurrency`
+  - Replaced `InngestMiddleware` usage with class-based `Middleware`
+  - Moved the runtime integration to the v4 two-argument `createFunction(options, handler)` API
+
+- **Serve and connect support**:
+  - Updated serve-mode registration to use the v4-origin naming and client configuration model
+  - Updated connect-mode configuration to the v4 gateway naming and current worker options
+  - Expanded e2e coverage to validate serve-mode and connect-mode registration against the Inngest dev server
+
+### Removed
+
+- **Removed v3-only public surface**:
+  - Removed `GetEvents`
+  - Removed `InngestMiddleware`
+  - Stopped documenting old v3-era config names as supported package API
 
 ### Fixed
 
-- **Connect health checks**: Updated `getConnectionHealth()` to match the current SDK's internal connection shape
+- **Decorator registration gaps**:
+  - Fixed `@Concurrency` so multiple rules register correctly
+  - Fixed `@Debounce` so `timeout` is preserved
+  - Fixed batching so `key` and `if` reach the SDK
+  - Tightened retry typing to the v4 `0..20` range
+  - Added method-based `@OnFailure(...)` resolution during discovery
+- **Connect health checks**:
+  - Updated `getConnectionHealth()` to match the current SDK's internal connection shape
   - Supports current same-thread connections exposed via `workerConnection.strategy.core.currentConnection`
   - Falls back cleanly to SDK state when `isolateExecution` uses the worker-thread strategy
   - Avoids falsely reporting healthy isolated workers as dead simply because raw WebSocket internals are not available
 
-- **Connect configuration**: Added first-class support for newer connect options
+- **Connect configuration**:
+  - Added first-class support for newer connect options
   - `connect.isolateExecution` is now typed, validated, and forwarded to the SDK
   - Added environment variable support for `INNGEST_CONNECT_MAX_WORKER_CONCURRENCY`
   - Added environment variable support for `INNGEST_CONNECT_ISOLATE_EXECUTION`

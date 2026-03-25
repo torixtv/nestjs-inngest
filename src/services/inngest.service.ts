@@ -11,7 +11,6 @@ import {
   Inngest,
   InngestFunction,
   EventPayload,
-  GetEvents,
   version as inngestVersion,
 } from 'inngest';
 import { extendedTracesMiddleware, InngestSpanProcessor } from 'inngest/experimental';
@@ -107,13 +106,25 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       id: this.options.id,
       eventKey: this.options.eventKey,
       baseUrl: this.options.baseUrl,
-      middleware: middleware as any,
+      signingKey: this.options.signingKey,
+      signingKeyFallback: this.options.signingKeyFallback,
+      middleware,
       logger: this.options.logger,
       ...this.options.clientOptions,
     });
 
-    // Add InngestSpanProcessor to the OpenTelemetry provider for Inngest dashboard traces
-    this.addInngestSpanProcessor();
+    const shouldAddDashboardSpanProcessor =
+      !this.options.clientOptions?.isDev && !!this.options.signingKey;
+
+    if (shouldAddDashboardSpanProcessor) {
+      this.addInngestSpanProcessor();
+    } else {
+      this.logger.debug({
+        message: 'Skipping InngestSpanProcessor in local/dev mode',
+        isDev: !!this.options.clientOptions?.isDev,
+        hasSigningKey: !!this.options.signingKey,
+      });
+    }
 
     this.logger.log({
       message: 'Inngest client created successfully',
@@ -220,8 +231,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
 
       this.logger.log('Establishing Inngest worker connection', {
         instanceId: connectOptions.instanceId,
-        maxWorkerConcurrency: connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency,
-        isolateExecution: connectOptions.isolateExecution ?? false,
+        maxWorkerConcurrency: connectOptions.maxWorkerConcurrency,
+        isolateExecution: connectOptions.isolateExecution,
         handleShutdownSignals: connectOptions.handleShutdownSignals ?? 'default',
         functionCount: this.functions.length,
       });
@@ -245,14 +256,6 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   }
 
   private buildConnectConfig(connectOptions: InngestConnectOptions) {
-    if (connectOptions.isolateExecution && connectOptions.rewriteGatewayEndpoint) {
-      throw new Error(
-        'connect.rewriteGatewayEndpoint is not supported when connect.isolateExecution is enabled',
-      );
-    }
-
-    const workerConcurrency = connectOptions.maxWorkerConcurrency ?? connectOptions.maxConcurrency;
-
     return {
       apps: [
         {
@@ -263,14 +266,14 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       ...(connectOptions.instanceId !== undefined && {
         instanceId: connectOptions.instanceId,
       }),
-      ...(workerConcurrency !== undefined && {
-        maxWorkerConcurrency: workerConcurrency,
+      ...(connectOptions.maxWorkerConcurrency !== undefined && {
+        maxWorkerConcurrency: connectOptions.maxWorkerConcurrency,
       }),
       ...(connectOptions.handleShutdownSignals !== undefined && {
         handleShutdownSignals: connectOptions.handleShutdownSignals,
       }),
-      ...(connectOptions.rewriteGatewayEndpoint !== undefined && {
-        rewriteGatewayEndpoint: connectOptions.rewriteGatewayEndpoint,
+      ...(connectOptions.gatewayUrl !== undefined && {
+        gatewayUrl: connectOptions.gatewayUrl,
       }),
       ...(connectOptions.isolateExecution !== undefined && {
         isolateExecution: connectOptions.isolateExecution,
@@ -322,7 +325,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * Register functions with Inngest dev server
    * Can be called manually to control when registration happens
    *
-   * @param overrides Optional overrides for serveHost and servePort
+   * @param overrides Optional overrides for serveOrigin and servePort
    * @example
    * ```typescript
    * // In main.ts after app.listen()
@@ -330,12 +333,12 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * await app.listen(port);
    * await app.get(InngestService).registerWithDevServer({
    *   servePort: port,
-   *   serveHost: 'localhost'
+   *   serveOrigin: 'http://localhost:3000'
    * });
    * ```
    */
   async registerWithDevServer(overrides?: {
-    serveHost?: string;
+    serveOrigin?: string;
     servePort?: number;
   }): Promise<void> {
     if (!this.options.baseUrl || this.options.baseUrl.includes('inngest.com')) {
@@ -349,20 +352,15 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         overrides?.servePort ??
         this.options.servePort ??
         (process.env.PORT ? parseInt(process.env.PORT) : 3000);
-      const host = overrides?.serveHost ?? this.options.serveHost ?? 'localhost';
+      const origin = overrides?.serveOrigin ?? this.options.serveOrigin ?? 'http://localhost';
 
-      // Handle serveHost as either full URL or hostname
-      // Use URL class to normalize (strips default ports like :80 for HTTP, :443 for HTTPS)
-      const path = this.options.path || '/api/inngest';
+      const path = this.options.servePath || this.options.path || '/api/inngest';
       const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-      let appUrl: string;
-      if (host.startsWith('http://') || host.startsWith('https://')) {
-        // serveHost is a full URL, normalize it
-        appUrl = new URL(normalizedPath, host).href;
-      } else {
-        // serveHost is just hostname, construct URL with port and normalize
-        appUrl = new URL(`http://${host}:${port}${normalizedPath}`).href;
-      }
+      const normalizedOrigin =
+        origin.startsWith('http://') || origin.startsWith('https://')
+          ? new URL(origin).origin
+          : new URL(`http://${origin}:${port}`).origin;
+      const appUrl = new URL(normalizedPath, normalizedOrigin).href;
 
       const devServerUrl = this.options.baseUrl;
 
@@ -375,10 +373,13 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         );
       }
 
-      if (host === 'localhost' && (process.env.KUBERNETES_SERVICE_HOST || process.env.DOCKER)) {
+      if (
+        normalizedOrigin.includes('localhost') &&
+        (process.env.KUBERNETES_SERVICE_HOST || process.env.DOCKER)
+      ) {
         this.logger.warn(
-          `Using 'localhost' for serveHost in containerized environment. ` +
-            `This may not work in Docker/Kubernetes. Consider using service DNS names or setting INNGEST_SERVE_HOST. ` +
+          `Using a localhost serveOrigin in a containerized environment. ` +
+            `This may not work in Docker/Kubernetes. Consider using a reachable service origin or setting INNGEST_SERVE_ORIGIN. ` +
             `See: https://github.com/yourusername/nestjs-inngest#kubernetes-docker-connection-issues`,
         );
       }
@@ -389,7 +390,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         port,
         source: overrides ? 'manual-registration' : 'auto-nestjs-inngest',
         hasSigningKey: !!this.options.signingKey,
-        configSource: overrides ? 'overrides' : this.getConfigSource(port, host),
+        configSource: overrides ? 'overrides' : this.getConfigSource(port),
       });
 
       const response = await fetch(`${devServerUrl}/fn/register`, {
@@ -432,7 +433,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   /**
    * Helper to determine where configuration values came from
    */
-  private getConfigSource(port: number, host: string): string {
+  private getConfigSource(port: number): string {
     const sources: string[] = [];
 
     if (this.options.servePort) {
@@ -445,12 +446,12 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       sources.push('default');
     }
 
-    if (this.options.serveHost) {
-      sources.push('explicit-host');
-    } else if (process.env.INNGEST_SERVE_HOST) {
-      sources.push('INNGEST_SERVE_HOST');
+    if (this.options.serveOrigin) {
+      sources.push('explicit-origin');
+    } else if (process.env.INNGEST_SERVE_ORIGIN) {
+      sources.push('INNGEST_SERVE_ORIGIN');
     } else {
-      sources.push('default-host');
+      sources.push('default-origin');
     }
 
     return sources.join(',');
@@ -625,11 +626,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   /**
    * Send an event to Inngest
    */
-  async send<TEvents extends Record<string, EventPayload> = GetEvents<Inngest>>(
-    payload: keyof TEvents extends never
-      ? EventPayload | EventPayload[]
-      : TEvents[keyof TEvents] | TEvents[keyof TEvents][],
-  ) {
+  async send(payload: EventPayload | EventPayload[]) {
     try {
       // Automatically inject trace context if tracing is enabled
       const enhancedPayload = this.injectTraceContext(payload);
@@ -648,12 +645,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   /**
    * Send an event with explicit trace context
    */
-  async sendWithTraceId<TEvents extends Record<string, EventPayload> = GetEvents<Inngest>>(
-    payload: keyof TEvents extends never
-      ? EventPayload | EventPayload[]
-      : TEvents[keyof TEvents] | TEvents[keyof TEvents][],
-    traceContext: TraceContext | string,
-  ) {
+  async sendWithTraceId(payload: EventPayload | EventPayload[], traceContext: TraceContext | string) {
     try {
       // Parse traceId if provided as string (W3C traceparent format)
       let parsedTraceContext: TraceContext;
@@ -790,20 +782,18 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * Create a function using the Inngest client
    */
   createFunction(options: any, handler: any): any {
-    // Extract trigger from options for Inngest v3 API: createFunction(options, trigger, handler)
     const { trigger, triggers, ...fnOptions } = options;
-
-    // Determine the trigger - could be from 'trigger' or 'triggers' or infer from event name
-    let triggerConfig = trigger;
-    if (!triggerConfig && triggers) {
-      triggerConfig = triggers[0] || triggers;
-    }
-    if (!triggerConfig && options.event) {
-      triggerConfig = { event: options.event };
-    }
+    const normalizedTriggers =
+      triggers ??
+      (trigger ? (Array.isArray(trigger) ? trigger : [trigger]) : undefined) ??
+      (options.event ? [{ event: options.event }] : undefined);
+    const functionOptions = {
+      ...fnOptions,
+      ...(normalizedTriggers !== undefined && { triggers: normalizedTriggers }),
+    };
 
     try {
-      const fn = this.inngestClient.createFunction(fnOptions, triggerConfig, handler);
+      const fn = this.inngestClient.createFunction(functionOptions, handler);
       this.registerFunction(fn);
       return fn;
     } catch (error) {
@@ -820,7 +810,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     return this.createFunction(
       {
         ...fnOptions,
-        trigger: { cron },
+        triggers: [{ cron }],
       },
       handler,
     );
@@ -927,13 +917,14 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     try {
       const currentConnection = this.resolveInternalCurrentConnection();
 
-      if (!currentConnection.supported) {
+      if (currentConnection.supported === false) {
+        const unsupportedReason = currentConnection.reason;
         const isHealthy = sdkState === activeState;
         return {
           isHealthy,
           reason: isHealthy
-            ? `Connection appears active (${currentConnection.reason})`
-            : `Connection state is ${sdkState} (${currentConnection.reason})`,
+            ? `Connection appears active (${unsupportedReason})`
+            : `Connection state is ${sdkState} (${unsupportedReason})`,
           sdkState,
           wsReadyState: null,
           wsStateName: null,

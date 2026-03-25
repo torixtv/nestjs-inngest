@@ -6,148 +6,110 @@ import {
   Retries,
   Concurrency
 } from '../../../../src';
-import { InngestMiddleware } from 'inngest';
+import { Middleware } from 'inngest';
 
-// Test middleware for integration testing
-const loggingMiddleware = new InngestMiddleware({
-  name: "Request Logging",
-  init: () => {
-    console.log('🔧 Logging middleware initialized');
-    return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`🚀 [MIDDLEWARE] Starting function: ${fn.id()}`);
-            console.log(`📦 [MIDDLEWARE] Event data:`, JSON.stringify(ctx.event, null, 2));
-            
-            // Add middleware metadata to context - ensure ctx exists
-            const enhancedCtx = {
-              ...ctx,
-              middlewareExecuted: [...((ctx as any).middlewareExecuted || []), 'logging']
-            };
-            
-            console.log(`🔧 [MIDDLEWARE] Enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
-            
-            return { ctx: enhancedCtx, function: fn, steps };
-          }
-        };
-      }
-    };
-  }
-});
+class LoggingMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'request-logging';
 
-const validationMiddleware = new InngestMiddleware({
-  name: "Event Validation", 
-  init: () => {
-    console.log('🔧 Validation middleware initialized');
-    return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`🔍 [MIDDLEWARE] Validating event for function: ${fn.id()}`);
-            
-            // Add validation logic
-            if (!ctx.event.data) {
-              throw new Error('Event data is required');
-            }
-            
-            // Add middleware metadata to context - ensure ctx exists and is properly spread
-            const enhancedCtx = {
-              ...ctx,
-              middlewareExecuted: [...((ctx as any).middlewareExecuted || []), 'validation'],
-              validatedAt: new Date().toISOString()
-            };
-            
-            console.log(`✅ [MIDDLEWARE] Event validated successfully`);
-            console.log(`🔧 [MIDDLEWARE] Final enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
-            
-            return { ctx: enhancedCtx, function: fn, steps };
-          }
-        };
-      }
-    };
-  }
-});
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`🚀 [MIDDLEWARE] Starting function: ${arg.fn.id()}`);
+    console.log(`📦 [MIDDLEWARE] Event data:`, JSON.stringify(arg.ctx.event, null, 2));
 
-// NEW: Create completely different middleware to test generics
-const authMiddleware = new InngestMiddleware({
-  name: "Authentication Check",
-  init: () => {
-    console.log('🔧 Auth middleware initialized');
-    return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`🔐 [AUTH] Checking authentication for function: ${fn.id()}`);
-            
-            // Simulate auth check
-            const userId = ctx.event.data?.userId || 'anonymous';
-            const isAuthenticated = userId !== 'anonymous';
-            const authLevel = isAuthenticated ? 'authenticated' : 'guest';
-            const permissions = isAuthenticated ? ['read', 'write'] : ['read'];
-            
-            const enhancedCtx = {
-              ...ctx,
-              // Completely different property names
-              currentUser: userId,
-              authenticationStatus: authLevel,
-              userPermissions: permissions,
-              authenticatedAt: new Date().toISOString(),
-              sessionId: `session_${Math.random().toString(36).substr(2, 9)}`,
-              authTokenValid: isAuthenticated
-            };
-            
-            console.log(`🔐 [AUTH] Authentication complete: ${authLevel}`);
-            console.log(`🔐 [AUTH] Auth enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
-            
-            return { ctx: enhancedCtx, function: fn, steps };
-          }
-        };
-      }
+    const enhancedCtx = {
+      ...arg.ctx,
+      middlewareExecuted: [
+        ...(((arg.ctx as any).middlewareExecuted as string[] | undefined) || []),
+        'logging',
+      ],
     };
-  }
-});
 
-const metricsMiddleware = new InngestMiddleware({
-  name: "Performance Metrics",
-  init: () => {
-    console.log('🔧 Metrics middleware initialized');
-    return {
-      onFunctionRun: ({ fn, ctx }) => {
-        return {
-          transformInput: ({ ctx, fn, steps }) => {
-            console.log(`📊 [METRICS] Tracking metrics for function: ${fn.id()}`);
-            
-            // Add performance tracking
-            const startTime = Date.now();
-            const requestId = `req_${Math.random().toString(36).substr(2, 9)}`;
-            const region = 'us-east-1';
-            
-            const enhancedCtx = {
-              ...ctx,
-              // More different property names
-              performanceStartTime: startTime,
-              requestTraceId: requestId,
-              executionRegion: region,
-              metricsEnabled: true,
-              functionCallCount: ((ctx as any).functionCallCount || 0) + 1,
-              customMetrics: {
-                memory: '128MB',
-                timeout: '30s',
-                priority: 'normal'
-              }
-            };
-            
-            console.log(`📊 [METRICS] Metrics tracking enabled for request: ${requestId}`);
-            console.log(`📊 [METRICS] Metrics enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
-            
-            return { ctx: enhancedCtx, function: fn, steps };
-          }
-        };
-      }
-    };
+    console.log(`🔧 [MIDDLEWARE] Enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
+
+    return { ...arg, ctx: enhancedCtx as typeof arg.ctx };
   }
-});
+}
+
+class ValidationMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'event-validation';
+
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`🔍 [MIDDLEWARE] Validating event for function: ${arg.fn.id()}`);
+
+    if (!arg.ctx.event.data) {
+      throw new Error('Event data is required');
+    }
+
+    const enhancedCtx = {
+      ...arg.ctx,
+      middlewareExecuted: [
+        ...(((arg.ctx as any).middlewareExecuted as string[] | undefined) || []),
+        'validation',
+      ],
+      validatedAt: new Date().toISOString(),
+    };
+
+    console.log(`✅ [MIDDLEWARE] Event validated successfully`);
+    console.log(`🔧 [MIDDLEWARE] Final enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
+
+    return { ...arg, ctx: enhancedCtx as typeof arg.ctx };
+  }
+}
+
+class AuthMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'authentication-check';
+
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`🔐 [AUTH] Checking authentication for function: ${arg.fn.id()}`);
+
+    const userId = (arg.ctx.event.data as { userId?: string } | undefined)?.userId || 'anonymous';
+    const isAuthenticated = userId !== 'anonymous';
+    const authLevel = isAuthenticated ? 'authenticated' : 'guest';
+    const permissions = isAuthenticated ? ['read', 'write'] : ['read'];
+
+    const enhancedCtx = {
+      ...arg.ctx,
+      currentUser: userId,
+      authenticationStatus: authLevel,
+      userPermissions: permissions,
+      authenticatedAt: new Date().toISOString(),
+      sessionId: `session_${Math.random().toString(36).slice(2, 11)}`,
+      authTokenValid: isAuthenticated,
+    };
+
+    console.log(`🔐 [AUTH] Authentication complete: ${authLevel}`);
+    console.log(`🔐 [AUTH] Auth enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
+
+    return { ...arg, ctx: enhancedCtx as typeof arg.ctx };
+  }
+}
+
+class MetricsMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'performance-metrics';
+
+  override transformFunctionInput(arg: Middleware.TransformFunctionInputArgs) {
+    console.log(`📊 [METRICS] Tracking metrics for function: ${arg.fn.id()}`);
+
+    const requestId = `req_${Math.random().toString(36).slice(2, 11)}`;
+    const enhancedCtx = {
+      ...arg.ctx,
+      performanceStartTime: Date.now(),
+      requestTraceId: requestId,
+      executionRegion: 'us-east-1',
+      metricsEnabled: true,
+      functionCallCount: (((arg.ctx as any).functionCallCount as number | undefined) || 0) + 1,
+      customMetrics: {
+        memory: '128MB',
+        timeout: '30s',
+        priority: 'normal',
+      },
+    };
+
+    console.log(`📊 [METRICS] Metrics tracking enabled for request: ${requestId}`);
+    console.log(`📊 [METRICS] Metrics enhanced context:`, JSON.stringify(enhancedCtx, null, 2));
+
+    return { ...arg, ctx: enhancedCtx as typeof arg.ctx };
+  }
+}
 
 @Injectable()
 export class MiddlewareTestService {
@@ -159,9 +121,9 @@ export class MiddlewareTestService {
   @InngestFunction({
     id: 'middleware-test-function',
     name: 'Test Function with Middleware',
-    trigger: { event: 'test.middleware' },
+    triggers: { event: 'test.middleware' },
   })
-  @UseMiddleware(loggingMiddleware, validationMiddleware)
+  @UseMiddleware(LoggingMiddleware, ValidationMiddleware)
   @Retries(2)
   @Concurrency(3)
   async testMiddleware({ event, step, ctx }: { event: any; step: any; ctx: any }) {
@@ -215,9 +177,9 @@ export class MiddlewareTestService {
   @InngestFunction({
     id: 'generic-middleware-test',
     name: 'Generic Middleware Test Function', 
-    trigger: { event: 'test.generic.middleware' },
+    triggers: { event: 'test.generic.middleware' },
   })
-  @UseMiddleware(authMiddleware, metricsMiddleware)
+  @UseMiddleware(AuthMiddleware, MetricsMiddleware)
   @Retries(1)
   @Concurrency(2)
   async testGenericMiddleware({ event, step, ctx }: { event: any; step: any; ctx: any }) {

@@ -7,13 +7,11 @@ import { InngestModuleOptions, InngestModuleAsyncOptions } from '../interfaces';
 export const ConnectOptionsSchema = z
   .object({
     instanceId: z.string().optional(),
-    maxConcurrency: z.number().min(1).optional(),
     maxWorkerConcurrency: z.number().min(1).optional(),
     handleShutdownSignals: z.array(z.string()).optional(),
     shutdownTimeout: z.number().min(1000).default(30000),
     isolateExecution: z.boolean().optional(),
-    // rewriteGatewayEndpoint is a function - allow any and validate at runtime
-    rewriteGatewayEndpoint: z.function().optional(),
+    gatewayUrl: z.string().url().optional(),
   })
   .passthrough() // Preserve any additional fields from Inngest SDK updates
   .optional();
@@ -30,9 +28,10 @@ export const InngestConfigSchema = z.object({
   clientOptions: z.object({}).passthrough().optional(),
   path: z.string().default('/api/inngest'),
   servePort: z.number().min(1).max(65535).optional(),
-  serveHost: z.string().optional(),
+  serveOrigin: z.string().optional(),
   servePath: z.string().optional(),
   signingKey: z.string().optional(),
+  signingKeyFallback: z.string().optional(),
   logger: z.any().optional(),
 
   // Disable auto-registration with Inngest dev server
@@ -238,6 +237,11 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     envConfig.signingKey = process.env.INNGEST_SIGNING_KEY;
   }
 
+  // Read signingKeyFallback from INNGEST_SIGNING_KEY_FALLBACK
+  if (process.env.INNGEST_SIGNING_KEY_FALLBACK) {
+    envConfig.signingKeyFallback = process.env.INNGEST_SIGNING_KEY_FALLBACK;
+  }
+
   // Read servePort from INNGEST_SERVE_PORT or PORT
   if (process.env.INNGEST_SERVE_PORT) {
     const port = parseInt(process.env.INNGEST_SERVE_PORT, 10);
@@ -251,9 +255,9 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     }
   }
 
-  // Read serveHost from INNGEST_SERVE_HOST
-  if (process.env.INNGEST_SERVE_HOST) {
-    envConfig.serveHost = process.env.INNGEST_SERVE_HOST;
+  // Read serveOrigin from INNGEST_SERVE_ORIGIN
+  if (process.env.INNGEST_SERVE_ORIGIN) {
+    envConfig.serveOrigin = process.env.INNGEST_SERVE_ORIGIN;
   }
 
   // Read servePath from INNGEST_SERVE_PATH
@@ -303,9 +307,8 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
     envConfig.connect.instanceId = instanceId;
   }
 
-  // Read maxWorkerConcurrency from the current SDK env var, with legacy fallback
-  const maxWorkerConcurrencyEnv =
-    process.env.INNGEST_CONNECT_MAX_WORKER_CONCURRENCY || process.env.INNGEST_MAX_CONCURRENCY;
+  // Read maxWorkerConcurrency from the current SDK env var
+  const maxWorkerConcurrencyEnv = process.env.INNGEST_CONNECT_MAX_WORKER_CONCURRENCY;
 
   if (maxWorkerConcurrencyEnv) {
     const concurrency = parseInt(maxWorkerConcurrencyEnv, 10);
@@ -313,12 +316,15 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
       if (!envConfig.connect) {
         envConfig.connect = {};
       }
-      if (process.env.INNGEST_CONNECT_MAX_WORKER_CONCURRENCY) {
-        envConfig.connect.maxWorkerConcurrency = concurrency;
-      } else {
-        envConfig.connect.maxConcurrency = concurrency;
-      }
+      envConfig.connect.maxWorkerConcurrency = concurrency;
     }
+  }
+
+  if (process.env.INNGEST_CONNECT_GATEWAY_URL) {
+    if (!envConfig.connect) {
+      envConfig.connect = {};
+    }
+    envConfig.connect.gatewayUrl = process.env.INNGEST_CONNECT_GATEWAY_URL;
   }
 
   // Read isolateExecution from INNGEST_CONNECT_ISOLATE_EXECUTION
@@ -355,13 +361,13 @@ function readEnvironmentConfig(): Partial<InngestModuleOptions> {
  *    - INNGEST_EVENT_KEY: Event key for sending events
  *    - INNGEST_SIGNING_KEY: Signing key for authentication
  *    - INNGEST_SERVE_PORT or PORT: Port where app is running
- *    - INNGEST_SERVE_HOST: Host where app is accessible
+ *    - INNGEST_SERVE_ORIGIN: Origin where app is accessible
  *    - INNGEST_PATH: Path for Inngest endpoint
  *    - INNGEST_APP_VERSION or npm_package_version: Application version
  *    - INNGEST_MODE: Connection mode ('serve' or 'connect')
  *    - INNGEST_INSTANCE_ID: Worker instance ID (or auto-detected from HOSTNAME, FLY_MACHINE_ID, etc.)
  *    - INNGEST_CONNECT_MAX_WORKER_CONCURRENCY: Maximum concurrent worker executions
- *    - INNGEST_MAX_CONCURRENCY: Legacy alias for maximum concurrent worker executions
+ *    - INNGEST_CONNECT_GATEWAY_URL: Override the connect gateway URL
  *    - INNGEST_CONNECT_ISOLATE_EXECUTION: Enable worker-thread-based connect isolation
  *    - INNGEST_SHUTDOWN_TIMEOUT: Graceful shutdown timeout in milliseconds
  * 3. Package defaults
