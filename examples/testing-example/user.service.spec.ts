@@ -16,7 +16,7 @@ class UserService {
 
   @InngestFunction({
     id: 'welcome-new-user',
-    trigger: { event: 'user.created' },
+    triggers: { event: 'user.created' },
   })
   async welcomeNewUser({ event, step }: { event: any; step: any }) {
     const { userId, email } = event.data;

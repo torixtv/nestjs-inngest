@@ -29,7 +29,7 @@ export class OrderService {
 
   @InngestFunction({
     id: 'order-received',
-    trigger: { event: 'order.received' }
+    triggers: { event: 'order.received' }
   })
   async handleOrderReceived(event: OrderReceivedEvent, step: any) {
     const { orderId, customerId, totalAmount } = event.data;
@@ -44,14 +44,16 @@ export class OrderService {
     });
 
     if (!isValid) {
-      await step.sendEvent('order.validation.failed', {
+      await step.sendEvent('send-order-validation-failed', {
+        name: 'order.validation.failed',
         data: { orderId, reason: 'Invalid order data' }
       });
       return { success: false, reason: 'Validation failed' };
     }
 
     // Initiate payment processing
-    await step.sendEvent('order.payment.required', {
+    await step.sendEvent('send-order-payment-required', {
+      name: 'order.payment.required',
       data: event.data
     });
 

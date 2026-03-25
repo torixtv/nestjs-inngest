@@ -3,11 +3,27 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
+const traceLogBuffer: string[] = [];
+export const tracingInitMessage = '🚀 OpenTelemetry initialized with console exporter for e2e testing';
+
+function traceLog(message: string) {
+  traceLogBuffer.push(message);
+  console.log(message);
+}
+
+export function getTraceLogBuffer() {
+  return [...traceLogBuffer];
+}
+
+export function clearTraceLogBuffer() {
+  traceLogBuffer.length = 0;
+}
+
 // Enhanced console exporter for e2e testing with detailed trace hierarchies
 const consoleExporter = {
   export: (spans: any[], resultCallback: any) => {
-    console.log('\n🔍 TRACING: OpenTelemetry Spans Export:');
-    console.log('=' .repeat(80));
+    traceLog('\n🔍 TRACING: OpenTelemetry Spans Export:');
+    traceLog('='.repeat(80));
     
     // Group spans by trace ID to show hierarchies
     const traceGroups = new Map<string, any[]>();
@@ -21,8 +37,8 @@ const consoleExporter = {
     
     // Display each trace group with hierarchy
     traceGroups.forEach((traceSpans, traceId) => {
-      console.log(`\n📊 Trace: ${traceId}`);
-      console.log('-'.repeat(60));
+      traceLog(`\n📊 Trace: ${traceId}`);
+      traceLog('-'.repeat(60));
       
       // Sort spans by start time to show execution order
       const sortedSpans = traceSpans.sort((a, b) => {
@@ -50,9 +66,9 @@ const consoleExporter = {
           indentation = '    ';
         }
         
-        console.log(`${indentation}${icon} ${span.name}`);
-        console.log(`${indentation}   ⏱️  Duration: ${duration.toFixed(2)}ms`);
-        console.log(`${indentation}   🔗 SpanId: ${spanContext.spanId}`);
+        traceLog(`${indentation}${icon} ${span.name}`);
+        traceLog(`${indentation}   ⏱️  Duration: ${duration.toFixed(2)}ms`);
+        traceLog(`${indentation}   🔗 SpanId: ${spanContext.spanId}`);
         
         // Show key attributes
         const keyAttributes: Record<string, any> = {};
@@ -69,35 +85,35 @@ const consoleExporter = {
         });
         
         if (Object.keys(keyAttributes).length > 0) {
-          console.log(`${indentation}   📋 Key Attributes:`);
+          traceLog(`${indentation}   📋 Key Attributes:`);
           Object.entries(keyAttributes).forEach(([key, value]) => {
             const displayKey = key.replace(/^inngest\./, '').replace(/^operation\./, 'op.');
-            console.log(`${indentation}      ${displayKey}: ${value}`);
+            traceLog(`${indentation}      ${displayKey}: ${value}`);
           });
         }
         
         // Show events if any
         if (span.events && span.events.length > 0) {
-          console.log(`${indentation}   🎭 Events: ${span.events.map((e: any) => e.name).join(', ')}`);
+          traceLog(`${indentation}   🎭 Events: ${span.events.map((e: any) => e.name).join(', ')}`);
         }
         
         // Show status if error
         if (span.status && span.status.code === 2) {
-          console.log(`${indentation}   ❌ Status: ERROR - ${span.status.message || 'Unknown error'}`);
+          traceLog(`${indentation}   ❌ Status: ERROR - ${span.status.message || 'Unknown error'}`);
         }
         
         if (index < sortedSpans.length - 1) {
-          console.log(`${indentation}   │`);
+          traceLog(`${indentation}   │`);
         }
       });
       
-      console.log('-'.repeat(60));
-      console.log(`✅ Trace complete (${traceSpans.length} spans)`);
+      traceLog('-'.repeat(60));
+      traceLog(`✅ Trace complete (${traceSpans.length} spans)`);
     });
     
-    console.log('\n' + '='.repeat(80));
-    console.log(`🎯 Export Summary: ${spans.length} spans across ${traceGroups.size} traces`);
-    console.log('🎉 End of spans export\n');
+    traceLog('\n' + '='.repeat(80));
+    traceLog(`🎯 Export Summary: ${spans.length} spans across ${traceGroups.size} traces`);
+    traceLog('🎉 End of spans export\n');
     resultCallback({ code: 0 }); // Success
   },
   shutdown: () => Promise.resolve()
@@ -121,7 +137,7 @@ const sdk = new NodeSDK({
 // Start OpenTelemetry SDK
 sdk.start();
 
-console.log('🚀 OpenTelemetry initialized with enhanced console exporter for e2e testing');
+traceLog(tracingInitMessage);
 
 // Export for cleanup if needed
 export { sdk };

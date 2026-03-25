@@ -7,6 +7,30 @@
 
 Modern NestJS integration for [Inngest](https://inngest.com) - the durable function platform. Build type-safe, decorator-based event-driven functions with step functions, automatic retries, and comprehensive observability.
 
+## 1.0.0 / Inngest v4
+
+`@torixtv/nestjs-inngest@1.0.0` is the first stable release of the package and the first release aligned with the Inngest v4 SDK.
+
+This is a breaking release for users upgrading from `0.x`:
+
+- Requires `inngest@^4.0.5`
+- Requires Node `>=20`
+- `trigger` is now `triggers`
+- `serveHost` is now `serveOrigin`
+- `rewriteGatewayEndpoint` is now `gatewayUrl`
+- `InngestMiddleware` is replaced by class-based `Middleware`
+- No long-term compatibility aliases are kept for the old v3-era names
+
+New in `1.0.0`:
+
+- Full decorator-first support for `@BatchEvents`, `@CancelOn`, `@Singleton`, `@Priority`, `@Idempotency`, `@Timeouts`, `@OptimizeParallelism`, `@Checkpointing`, and `@OnFailure`
+- `@Concurrency` now supports numeric, object, and rule-array forms
+- `@Debounce` now supports `timeout`
+- `@BatchEvents` now supports `key` and `if`
+- Re-exports for v4 helpers such as `eventType`, `cron`, `invoke`, `staticSchema`, `referenceFunction`, `group`, and `step`
+
+If you are upgrading from a previous version of this package, start with [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md).
+
 ## Table of Contents
 
 - [What is Inngest?](#what-is-inngest)
@@ -40,13 +64,13 @@ This NestJS integration brings Inngest's powerful capabilities to your NestJS ap
 ## Key Features
 
 ✨ **Type-Safe Decorators** - `@InngestFunction`, `@InngestEvent`, `@InngestCron`  
-🔧 **Step Functions** - Reliable multi-step workflows with `step.run()`, `step.waitForEvent()`  
-⚡ **Flow Control** - `@Throttle`, `@Debounce`, `@RateLimit`, `@Concurrency`, `@Retries`  
-📊 **Observability** - OpenTelemetry tracing, health checks, metrics collection  
-🧪 **Testing Support** - Comprehensive testing utilities and mocks  
-🔌 **Middleware** - Custom middleware with `@UseMiddleware`  
-📦 **Modular Architecture** - Optional health and monitoring modules  
-🚀 **Production Ready** - Built for enterprise with monitoring and error handling
+🔧 **Durable Step Functions** - `step.run()`, `step.waitForEvent()`, `step.sendEvent()`, `step.sleep()`, `step.sleepUntil()`  
+⚡ **Execution Controls** - `@Concurrency`, `@RateLimit`, `@Throttle`, `@Debounce`, `@Retries`, `@BatchEvents`, `@CancelOn`, `@Singleton`, `@Priority`, `@Idempotency`, `@Timeouts`  
+🧠 **Execution Tuning** - `@OptimizeParallelism`, `@Checkpointing`, `@OnFailure`  
+🔌 **Class-Based Middleware** - Function-level and client-level middleware with `Middleware.BaseMiddleware`  
+🔄 **Serve and Connect Modes** - HTTP webhook mode and WebSocket worker mode  
+📊 **Observability** - OpenTelemetry tracing, health checks, and monitoring modules  
+🧪 **Testing Support** - Testing module helpers, mocks, and live e2e coverage against the Inngest dev server
 
 ## Installation
 
@@ -67,22 +91,21 @@ pnpm add @torixtv/nestjs-inngest inngest
 npm install @nestjs/common @nestjs/core reflect-metadata rxjs zod
 ```
 
+### Runtime Requirements
+
+- Node `>=20`
+
 ### Optional Dependencies (for advanced features)
 
 ```bash
-# For OpenTelemetry tracing (IMPORTANT: Use compatible versions)
-npm install @opentelemetry/api@^1.9.0 @opentelemetry/sdk-node@^0.56.0
+# For OpenTelemetry tracing
+npm install @opentelemetry/api @opentelemetry/sdk-node
 
 # For health checks and monitoring
 npm install @nestjs/terminus @nestjs/platform-express
 ```
 
-> **⚠️ OpenTelemetry Version Constraints**: Due to Inngest's OpenTelemetry dependencies, you must use compatible versions:
->
-> - `@opentelemetry/api@^1.9.0` (latest stable)
-> - `@opentelemetry/sdk-node@^0.56.0` (matches Inngest v3.40.x)
->
-> Using newer versions (e.g., sdk-node v0.205.x) will cause runtime conflicts. These constraints will be lifted when Inngest updates their OpenTelemetry dependencies.
+> Use OpenTelemetry versions compatible with the installed `inngest` SDK. Inngest v4 expects Node 20+ and current OpenTelemetry 2.x-compatible packages.
 
 ## Quick Start
 
@@ -100,9 +123,10 @@ import { UserService } from './user.service';
       id: 'my-nestjs-app',
       // For development - connects to local Inngest dev server
       baseUrl: 'http://localhost:8288',
-      // Configure custom port and host (for auto-registration)
+      eventKey: process.env.INNGEST_EVENT_KEY,
+      // Configure custom port and origin (for auto-registration)
       servePort: 3002,
-      serveHost: 'localhost',
+      serveOrigin: 'http://localhost:3002',
       // For production - remove baseUrl to use Inngest Cloud
       signingKey: process.env.INNGEST_SIGNING_KEY,
       environment: process.env.NODE_ENV as 'development' | 'production',
@@ -199,7 +223,7 @@ import { InngestFunction } from '@torixtv/nestjs-inngest';
 export class OrderService {
   @InngestFunction({
     id: 'process-order',
-    trigger: { event: 'order.created' },
+    triggers: { event: 'order.created' },
     concurrency: 10,
     retries: 3,
     batchEvents: {
@@ -235,6 +259,31 @@ async handleLargePayment({ event, step }) {
 @InngestEvent('handle-user-activity', ['user.login', 'user.purchase', 'user.updated'])
 async handleUserActivity({ event, step }) {
   // Triggered by any of the specified events
+}
+```
+
+#### New v4 execution decorators
+
+```typescript
+@InngestFunction({
+  id: 'sync-account',
+  triggers: { event: 'account.sync.requested' },
+})
+@Concurrency([{ limit: 5, key: 'event.data.accountId' }])
+@BatchEvents(25, '30s', { key: 'event.data.accountId', if: 'event.data.priority != \"low\"' })
+@CancelOn([
+  { event: 'account.sync.cancelled', match: 'data.accountId' },
+  { event: 'account.deleted', match: 'data.accountId' },
+])
+@Timeouts({ start: '5m', finish: '30m' })
+@Idempotency('event.data.requestId')
+@OnFailure('handleSyncFailure')
+async syncAccount({ event, step }) {
+  // ...
+}
+
+async handleSyncFailure({ event, step }) {
+  // ...
 }
 ```
 
@@ -407,27 +456,31 @@ async delayedFollowUp({ event, step }) {
 #### @UseMiddleware - Custom Middleware
 
 ```typescript
-// Custom logging middleware
-const loggingMiddleware = {
-  init: () => ({
-    onFunctionRun: ({ fn }) => {
-      console.log(`Function ${fn.id} starting...`);
-      return {
-        transformOutput: (result) => {
-          console.log(`Function ${fn.id} completed:`, result);
-          return result;
-        },
-      };
-    },
-  }),
-};
+import { Middleware } from '@torixtv/nestjs-inngest';
+
+class LoggingMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'logging';
+
+  onFunctionRun() {
+    return {
+      transformInput: ({ ctx }) => {
+        console.log(`Starting ${ctx.functionId}`);
+        return { ctx };
+      },
+      transformOutput: ({ result }) => {
+        console.log('Completed with result:', result);
+        return result;
+      },
+    };
+  }
+}
 
 @Injectable()
 export class PaymentService {
   @InngestEvent('process-payment', 'payment.requested')
-  @UseMiddleware(loggingMiddleware)
+  @UseMiddleware(LoggingMiddleware)
   async processPayment({ event, step }) {
-    // Your payment logic with automatic logging
+    // Your payment logic with middleware hooks
   }
 }
 ```
@@ -447,6 +500,23 @@ async heavyProcessing({ event, step }) {
 @Concurrency(1, { key: 'event.data.userId' })
 async userSpecificTask({ event, step }) {
   // Only one task per user at a time
+}
+
+// Full object form
+@InngestEvent('tenant-task', 'tenant.task-requested')
+@Concurrency({ limit: 2, key: 'event.data.tenantId', scope: 'env' })
+async tenantTask({ event, step }) {
+  // Two concurrent executions per tenant across the environment
+}
+
+// Multiple rules
+@InngestEvent('account-sync', 'account.sync.requested')
+@Concurrency([
+  { limit: 1, key: 'event.data.accountId' },
+  { limit: 5, key: 'event.data.userId' },
+])
+async accountSync({ event, step }) {
+  // Combines multiple concurrency policies
 }
 ```
 
@@ -487,6 +557,13 @@ async sendNotification({ event, step }) {
 @Debounce('5s', 'event.data.documentId')
 async saveDocument({ event, step }) {
   // Only save if no changes for 5 seconds
+}
+
+// Debounce with a maximum timeout
+@InngestEvent('sync-search-index', 'document.changed')
+@Debounce('10s', 'event.data.documentId', '5m')
+async syncSearchIndex({ event, step }) {
+  // Wait for a quiet period, but do not postpone forever
 }
 ```
 
@@ -853,7 +930,7 @@ Before diving into specific configuration patterns, it's important to understand
 When configuring the Inngest module, you're dealing with three separate concerns:
 
 1. **Inngest Server Location** (`baseUrl`): Where the Inngest server is running
-2. **Your App Location** (`serveHost`, `servePort`): Where YOUR NestJS app is accessible
+2. **Your App Location** (`serveOrigin`, `servePort`): Where YOUR NestJS app is accessible
 3. **Endpoint Path** (`path`): Where the Inngest functions endpoint is served in your app
 
 ##### Visual Architecture
@@ -862,7 +939,7 @@ When configuring the Inngest module, you're dealing with three separate concerns
 ┌──────────────────────────────┐         ┌──────────────────────────────┐
 │  Inngest Dev Server          │         │  Your NestJS App             │
 │  localhost:8288              │◄────────│  localhost:3000              │
-│  (baseUrl)                   │  calls  │  (serveHost:servePort)       │
+│  (baseUrl)                   │  calls  │  (serveOrigin:servePort)     │
 │                              │         │                              │
 │  - Function registry         │         │  /api/inngest                │
 │  - Event queue               │         │  (path + globalPrefix)       │
@@ -874,12 +951,12 @@ When configuring the Inngest module, you're dealing with three separate concerns
 
 1. When your NestJS app starts, it creates an endpoint at `path` (default: `/inngest`)
 2. If `baseUrl` points to a dev server (not `inngest.com`), the module automatically POSTs to `{baseUrl}/fn/register`
-3. The registration tells Inngest: "My functions are available at `http://{serveHost}:{servePort}/{path}`"
+3. The registration tells Inngest: "My functions are available at `{serveOrigin}:{servePort}/{path}`"
 4. Inngest dev server then calls YOUR app at that URL when events trigger your functions
 
 ##### Common Confusion Points
 
-**"What is serveHost/servePort for?"**
+**"What is serveOrigin/servePort for?"**
 
 - These are NOT Inngest's host/port (that's `baseUrl`)
 - These tell Inngest where YOUR app is running
@@ -903,9 +980,9 @@ The module follows this precedence order when determining configuration values:
 
 ```
 1. Explicit configuration in forRoot() / forRootAsync()
-2. Environment variables (INNGEST_SERVE_PORT, INNGEST_SERVE_HOST, INNGEST_PATH)
+2. Environment variables (INNGEST_SERVE_PORT, INNGEST_SERVE_ORIGIN, INNGEST_PATH)
 3. Standard environment variables (PORT for servePort)
-4. Package defaults (servePort: 3000, serveHost: 'localhost', path: 'inngest')
+4. Package defaults (servePort: 3000, serveOrigin: 'http://localhost', path: 'inngest')
 ```
 
 #### Custom Port & Host Configuration
@@ -919,19 +996,19 @@ InngestModule.forRoot({
 
   // Option 1: Hostname + Port (for local development)
   servePort: 3002,
-  serveHost: 'localhost',
+  serveOrigin: 'http://localhost',
 
   // Option 2: Full URL (for production/custom setups)
-  serveHost: 'https://myapp.herokuapp.com',
-  // servePort is ignored when serveHost is a full URL
+  serveOrigin: 'https://myapp.herokuapp.com',
+  // servePort is ignored when serveOrigin is a full URL
 
   // Option 3: Environment variables (recommended)
   servePort: parseInt(process.env.PORT || '3000'),
-  serveHost: process.env.INNGEST_SERVE_HOST || 'localhost',
+  serveOrigin: process.env.INNGEST_SERVE_ORIGIN || 'http://localhost',
 
   // Option 4: Let environment variables handle it (with new auto-detection)
   // servePort auto-reads from INNGEST_SERVE_PORT or PORT
-  // serveHost auto-reads from INNGEST_SERVE_HOST
+  // serveOrigin auto-reads from INNGEST_SERVE_ORIGIN
   // path auto-reads from INNGEST_PATH
 });
 ```
@@ -951,7 +1028,7 @@ InngestModule.forRoot({
   baseUrl: 'http://localhost:8288',
   // That's it! Defaults handle the rest:
   // - servePort: 3000
-  // - serveHost: 'localhost'
+  // - serveOrigin: 'http://localhost'
   // - path: 'inngest'
 });
 
@@ -1020,7 +1097,7 @@ InngestModule.forRootAsync({
     eventKey: config.get('INNGEST_EVENT_KEY'),
     environment: 'production',
     // No baseUrl - uses Inngest Cloud
-    // For cloud platforms, you typically don't need serveHost/servePort
+    // For cloud platforms, you typically don't need serveOrigin/servePort
     // because Inngest Cloud reaches you via your public URL
   }),
   inject: [ConfigService],
@@ -1040,12 +1117,12 @@ InngestModule.forRootAsync({
     baseUrl: config.get('INNGEST_BASE_URL'), // If using self-hosted Inngest
 
     // Option A: Explicit K8s service DNS
-    serveHost: config.get('K8S_SERVICE_HOST', 'my-app.default.svc.cluster.local'),
+    serveOrigin: `http://${config.get('K8S_SERVICE_HOST', 'my-app.default.svc.cluster.local')}`,
     servePort: config.get('SERVICE_PORT', 8080),
 
     // Option B: Use environment variables (recommended)
     // Set in your K8s deployment:
-    // - INNGEST_SERVE_HOST=my-app.default.svc.cluster.local
+    // - INNGEST_SERVE_ORIGIN=http://my-app.default.svc.cluster.local
     // - PORT=8080
     // Module will auto-read these
   }),
@@ -1057,8 +1134,8 @@ InngestModule.forRootAsync({
 
 ```yaml
 env:
-  - name: INNGEST_SERVE_HOST
-    value: 'my-app-service.default.svc.cluster.local'
+  - name: INNGEST_SERVE_ORIGIN
+    value: 'http://my-app-service.default.svc.cluster.local'
   - name: PORT
     value: '8080'
   - name: INNGEST_APP_ID
@@ -1077,7 +1154,7 @@ InngestModule.forRoot({
   id: 'my-app',
   // Use Docker service name from docker-compose.yml
   baseUrl: 'http://inngest:8288',
-  serveHost: 'app', // Docker service name for your NestJS app
+  serveOrigin: 'http://app', // Docker service name for your NestJS app
   servePort: 3000,
 });
 ```
@@ -1091,7 +1168,7 @@ services:
     ports:
       - '3000:3000'
     environment:
-      - INNGEST_SERVE_HOST=app
+      - INNGEST_SERVE_ORIGIN=http://app
       - PORT=3000
 
   inngest:
@@ -1122,7 +1199,7 @@ async function bootstrap() {
   // Now register with the actual port
   const inngestService = app.get(InngestService);
   await inngestService.registerWithDevServer({
-    serveHost: 'localhost',
+    serveOrigin: 'http://localhost',
     servePort: port,
   });
 
@@ -1181,6 +1258,7 @@ InngestModule.forRoot({
   signingKey: process.env.INNGEST_SIGNING_KEY,
   connect: {
     instanceId: 'worker-1', // Optional: unique identifier for this worker
+    gatewayUrl: process.env.INNGEST_GATEWAY_URL, // Optional: override the connect gateway
     maxWorkerConcurrency: 10, // Optional: max concurrent function executions
     isolateExecution: true, // Optional: run connection management in a worker thread
     shutdownTimeout: 30000, // Optional: graceful shutdown timeout in ms
@@ -1225,8 +1303,8 @@ INNGEST_MODE=connect
 | Option                  | Type       | Default                 | Description                                           |
 | ----------------------- | ---------- | ----------------------- | ----------------------------------------------------- |
 | `instanceId`            | `string`   | Hostname/platform ID    | Unique identifier for this worker instance            |
+| `gatewayUrl`            | `string`   | `undefined`             | Override the default connect gateway URL              |
 | `maxWorkerConcurrency`  | `number`   | `undefined`             | Maximum concurrent function executions                |
-| `maxConcurrency`        | `number`   | `undefined`             | Deprecated alias for `maxWorkerConcurrency`           |
 | `isolateExecution`      | `boolean`  | `false`                 | Run connection management in a separate worker thread |
 | `shutdownTimeout`       | `number`   | `30000`                 | Time in ms to wait for graceful shutdown              |
 | `handleShutdownSignals` | `string[]` | `['SIGTERM', 'SIGINT']` | Process signals to handle for shutdown                |
@@ -2031,22 +2109,25 @@ export class NotificationService {
 
 | Option        | Type                      | Default                      | Description                                                                                       |
 | ------------- | ------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------- |
-| `id`          | `string`                  | **Required**                 | Your Inngest app ID                                                                               |
-| `eventKey`    | `string`                  | `undefined`                  | Event key for sending events                                                                      |
-| `baseUrl`     | `string`                  | `undefined`                  | Inngest server URL (omit for cloud)                                                               |
-| `signingKey`  | `string`                  | `undefined`                  | Webhook signing key for production                                                                |
-| `isGlobal`    | `boolean`                 | `false`                      | Make module available globally                                                                    |
-| `mode`        | `'serve' \| 'connect'`    | `'serve'`                    | Connection mode: HTTP webhooks or WebSocket                                                       |
-| `connect`     | `InngestConnectOptions`   | `{}`                         | Connect mode configuration (see [Connection Modes](#connection-modes))                            |
-| `path`        | `string`                  | `'inngest'`                  | API endpoint path (serve mode only)                                                               |
-| `servePort`   | `number`                  | `process.env.PORT \|\| 3000` | Port where your app runs (for auto-registration)                                                  |
-| `serveHost`   | `string`                  | `'localhost'`                | Host/URL where your app runs. Can be hostname (`'localhost'`) or full URL (`'https://myapp.com'`) |
-| `environment` | `string`                  | `'development'`              | Environment name                                                                                  |
-| `middleware`  | `InngestMiddleware[]`     | `[]`                         | Global middleware                                                                                 |
-| `logger`      | `any`                     | `undefined`                  | Custom logger                                                                                     |
-| `tracing`     | `InngestTracingConfig`    | `{}`                         | Tracing configuration                                                                             |
-| `monitoring`  | `InngestMonitoringConfig` | `{}`                         | Monitoring configuration                                                                          |
-| `health`      | `InngestHealthConfig`     | `{}`                         | Health check configuration                                                                        |
+| `id`                    | `string`                  | **Required**                 | Your Inngest app ID                                                                               |
+| `eventKey`              | `string`                  | `undefined`                  | Event key for sending events                                                                      |
+| `baseUrl`               | `string`                  | `undefined`                  | Inngest server URL for self-hosted or local dev                                                   |
+| `signingKey`            | `string`                  | `undefined`                  | Signing key for validating incoming serve-mode requests                                           |
+| `signingKeyFallback`    | `string`                  | `undefined`                  | Secondary signing key during rotation                                                             |
+| `isGlobal`              | `boolean`                 | `false`                      | Make the module available globally                                                                |
+| `mode`                  | `'serve' \| 'connect'`    | `'serve'`                    | Connection mode: HTTP webhooks or WebSocket worker                                                |
+| `connect`               | `InngestConnectOptions`   | `{}`                         | Connect mode configuration                                                                        |
+| `path`                  | `string`                  | `'inngest'`                  | API endpoint path                                                                                 |
+| `servePath`             | `string`                  | `undefined`                  | External callback path used for registration when it differs from `path`                          |
+| `servePort`             | `number`                  | `process.env.PORT \|\| 3000` | Port where your app runs for auto-registration                                                    |
+| `serveOrigin`           | `string`                  | `'http://localhost'`         | Reachable origin for auto-registration in serve mode                                              |
+| `disableAutoRegistration` | `boolean`               | `false`                      | Disable automatic registration with the dev server                                                |
+| `environment`           | `string`                  | `'development'`              | Inngest environment name                                                                          |
+| `middleware`            | `Middleware.Class[]`      | `[]`                         | Global middleware classes                                                                         |
+| `logger`                | `any`                     | `undefined`                  | Custom logger                                                                                     |
+| `tracing`               | `InngestTracingConfig`    | `{}`                         | Tracing configuration                                                                             |
+| `monitoring`            | `InngestMonitoringConfig` | `{}`                         | Monitoring configuration                                                                          |
+| `health`                | `InngestHealthConfig`     | `{}`                         | Health check configuration                                                                        |
 
 ### Decorators
 
@@ -2054,15 +2135,25 @@ export class NotificationService {
 
 ```typescript
 interface InngestFunctionConfig {
-  id: string; // Unique function ID
-  trigger: TriggerConfig; // Event trigger or cron schedule
-  concurrency?: number | ConcurrencyConfig;
-  retries?: number;
+  id?: string; // Unique function ID; defaults to the method name
+  name?: string;
+  description?: string;
+  triggers?: TriggerConfig | TriggerConfig[];
+  concurrency?: number | ConcurrencyConfig | ConcurrencyConfig[];
   batchEvents?: BatchConfig;
-  cancelOn?: CancelConfig[];
+  idempotency?: string;
   rateLimit?: RateLimit;
   throttle?: ThrottleConfig;
   debounce?: DebounceConfig;
+  priority?: { run?: string };
+  timeouts?: { start?: string; finish?: string };
+  singleton?: { mode: 'skip' | 'cancel'; key?: string };
+  cancelOn?: CancelConfig[];
+  retries?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
+  middleware?: Middleware.Class[];
+  onFailure?: InngestFunctionHandler;
+  optimizeParallelism?: boolean;
+  checkpointing?: boolean | CheckpointingConfig;
 }
 ```
 
@@ -2098,11 +2189,22 @@ Shorthand for scheduled functions.
 
 ```typescript
 @UseMiddleware(...middleware)         // Custom middleware
-@Concurrency(limit, options?)         // Concurrency control
+@Concurrency(limit, options?)         // Numeric concurrency form
+@Concurrency(option)                  // Single concurrency rule object
+@Concurrency(options)                 // Multiple concurrency rules
 @RateLimit(limit, period, key?)       // Rate limiting
 @Throttle(limit, period, options?)    // Throttling with burst
-@Debounce(period, key?)               // Debouncing
+@Debounce(period, key?, timeout?)     // Debouncing with optional timeout
 @Retries(count)                       // Retry configuration
+@BatchEvents(maxSize, timeout, opts?) // Event batching
+@CancelOn(rule | rules[])             // Cancellation rules
+@Singleton(modeOrConfig, key?)        // Singleton execution
+@Priority(runOrConfig)                // Run priority expression
+@Idempotency(key)                     // Idempotency expression
+@Timeouts(config)                     // Start and finish timeouts
+@OptimizeParallelism(enabled?)        // Promise scheduling hint
+@Checkpointing(config?)               // Checkpointing control
+@OnFailure(methodName)                // Method-based failure handler
 ```
 
 ### InngestService Methods
@@ -2681,7 +2783,7 @@ curl -X PUT http://localhost:3000/inngest
 InngestModule.forRoot({
   id: 'my-app',
   baseUrl: 'http://localhost:8288', // ✓ Must be where Inngest dev server runs
-  serveHost: 'localhost', // ✓ Must be where YOUR app runs
+  serveOrigin: 'http://localhost', // ✓ Must be where YOUR app runs
   servePort: 3000, // ✓ Must match app.listen() port
   path: 'inngest', // ✓ Endpoint path in your app
 });
@@ -2779,7 +2881,7 @@ InngestModule.forRoot({
 
 **Problem:** Functions work locally but not in Kubernetes/Docker.
 
-**Root Cause:** `serveHost` is set to `localhost` but Inngest can't reach `localhost` from another container/pod.
+**Root Cause:** `serveOrigin` points at `localhost`, but Inngest can't reach `localhost` from another container or pod.
 
 **Solutions:**
 
@@ -2789,7 +2891,7 @@ InngestModule.forRoot({
 // Use Docker service names, not 'localhost'
 InngestModule.forRoot({
   baseUrl: 'http://inngest:8288', // Inngest service name
-  serveHost: 'app', // Your app's service name
+  serveOrigin: 'http://app', // Your app's service name
   servePort: 3000,
 });
 ```
@@ -2799,13 +2901,13 @@ InngestModule.forRoot({
 ```typescript
 // Use full K8s service DNS
 InngestModule.forRoot({
-  serveHost: 'my-app-service.default.svc.cluster.local',
+  serveOrigin: 'http://my-app-service.default.svc.cluster.local',
   servePort: 8080,
 });
 
 // Or use environment variables (recommended):
 // Set in deployment YAML:
-// - INNGEST_SERVE_HOST=my-app-service.default.svc.cluster.local
+// - INNGEST_SERVE_ORIGIN=http://my-app-service.default.svc.cluster.local
 ```
 
 **Debug checklist:**
@@ -2814,7 +2916,7 @@ InngestModule.forRoot({
 # From within the Inngest container/pod, can you reach your app?
 kubectl exec -it inngest-pod -- curl http://my-app-service:8080/inngest
 
-# If this fails, your serveHost/servePort is wrong or network policies are blocking
+# If this fails, your serveOrigin/servePort is wrong or network policies are blocking
 ```
 
 #### Events not triggering functions

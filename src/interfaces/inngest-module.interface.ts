@@ -1,4 +1,4 @@
-import { InngestMiddleware, ClientOptions } from 'inngest';
+import { ClientOptions, Middleware } from 'inngest';
 import { ModuleMetadata, Type } from '@nestjs/common';
 
 /**
@@ -35,14 +35,6 @@ export interface InngestConnectOptions {
   maxWorkerConcurrency?: number;
 
   /**
-   * @deprecated Use `maxWorkerConcurrency` instead. This option will be removed in a future version.
-   *
-   * Maximum concurrent function steps this worker can handle.
-   * Helps with load distribution and preventing worker overload.
-   */
-  maxConcurrency?: number;
-
-  /**
    * List of shutdown signals to handle for graceful shutdown.
    * By default, handles SIGINT and SIGTERM.
    * Set to an empty array to disable automatic signal handling.
@@ -62,7 +54,7 @@ export interface InngestConnectOptions {
    * Custom function to rewrite the gateway endpoint URL.
    * Useful for self-hosted Inngest or custom network configurations.
    */
-  rewriteGatewayEndpoint?: (url: string) => string;
+  gatewayUrl?: string;
 
   /**
    * Run connect's WebSocket, heartbeat, and lease extension logic in a
@@ -179,7 +171,7 @@ export interface InngestModuleOptions {
   /**
    * Middleware to apply to all functions
    */
-  middleware?: InngestMiddleware<any>[];
+  middleware?: Middleware.Class[];
 
   /**
    * Additional client options
@@ -201,7 +193,7 @@ export interface InngestModuleOptions {
    * The host URL where this application is accessible (for auto-registration)
    * Defaults to 'localhost' in development
    */
-  serveHost?: string;
+  serveOrigin?: string;
 
   /**
    * The path to report to Inngest for callbacks.
@@ -228,6 +220,11 @@ export interface InngestModuleOptions {
    * Signing key for webhook signature validation
    */
   signingKey?: string;
+
+  /**
+   * Fallback signing key for key rotation support
+   */
+  signingKeyFallback?: string;
 
   /**
    * Logger instance or configuration

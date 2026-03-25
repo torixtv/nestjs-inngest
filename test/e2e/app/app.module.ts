@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { MiddlewareModule } from './middleware/middleware.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { TestModule } from './test/test.module';
+import { DecoratorVerificationModule } from './decorator-verification/decorator-verification.module';
 
 // Test controller
 import { TestController } from './test.controller';
@@ -17,16 +18,20 @@ import { TestController } from './test.controller';
   imports: [
     // Configure Inngest to connect to local dev server
     InngestModule.forRoot({
-      id: 'nestjs-integration-test',
+      id: 'nestjs-integration-test-v4',
       
       // Connect to local Inngest dev server
       baseUrl: 'http://localhost:8288',
+      serveOrigin: 'http://127.0.0.1:3101',
+      servePort: 3101,
+      path: 'inngest',
+      servePath: 'api/inngest',
       
       // No signing key needed for local development
       signingKey: undefined,
       
-      // No event key needed for local development
-      eventKey: undefined,
+      // Inngest v4 requires an event key even against the local dev server
+      eventKey: 'test-event-key',
       
       // Make module global so all services can use InngestService
       isGlobal: true,
@@ -36,7 +41,7 @@ import { TestController } from './test.controller';
       
       // Additional client options
       clientOptions: {
-        // Add any additional Inngest client options here
+        isDev: true,
       },
       
       // Enable tracing for e2e testing
@@ -62,6 +67,7 @@ import { TestController } from './test.controller';
     MiddlewareModule,
     MonitoringModule,
     TestModule,
+    DecoratorVerificationModule,
   ],
   controllers: [TestController],
 })
@@ -75,7 +81,7 @@ export class AppModule {
     });
     this.logger.log('Inngest module configured for local dev server', {
       devServerUrl: 'localhost:8288',
-      clientId: 'nestjs-integration-test'
+      clientId: 'nestjs-integration-test-v4'
     });
     this.logger.log('Inngest function discovery enabled', {
       autoDiscovery: true,

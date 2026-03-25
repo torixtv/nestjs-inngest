@@ -29,7 +29,7 @@ export class NotificationService {
   // Throttled notification processor
   @InngestFunction({
     id: 'process-user-update-notification',
-    trigger: { event: 'notification.user.updated' },
+    triggers: { event: 'notification.user.updated' },
   })
   @Throttle(50, '1m') // Max 50 notifications per minute with burst support
   async processUserUpdateNotification({ 
@@ -86,7 +86,7 @@ export class NotificationService {
   // Debounced email sender (prevents spam)
   @InngestFunction({
     id: 'send-email-notification',
-    trigger: { event: 'notification.email.send' },
+    triggers: { event: 'notification.email.send' },
   })
   @Debounce('30s', 'event.data.to') // Debounce by email address
   async sendEmailNotification({ 
@@ -136,7 +136,7 @@ export class NotificationService {
   // Batch notification processor
   @InngestFunction({
     id: 'process-notification-batch',
-    trigger: { event: 'notification.batch.process' },
+    triggers: { event: 'notification.batch.process' },
     batchEvents: {
       maxSize: 10,
       timeout: '5m',

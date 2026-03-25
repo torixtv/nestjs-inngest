@@ -311,7 +311,7 @@ export class HealthService {
   @InngestFunction({
     id: 'process-health-alert',
     name: 'Process Health Alert',
-    trigger: { event: 'system.health.alert' },
+    triggers: { event: 'system.health.alert' },
   })
   @RateLimit(20, '5m') // Limit alerts to prevent spam
   async processHealthAlert({ event, step }: { event: AppEvents['system.health.alert']; step: any }) {

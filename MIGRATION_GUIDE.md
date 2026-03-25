@@ -1,47 +1,336 @@
-# Serve to Connect Migration Guide
+# Migration Guide: `0.x` to `1.0.0`
 
-This guide is for teams currently running `@torixtv/nestjs-inngest` in `serve` mode and planning to move to `connect`.
+This guide is for users upgrading from any previous `0.x` release of `@torixtv/nestjs-inngest` to `1.0.0`.
 
-It is intentionally conservative. The main goal is a safe migration without repeating the connection-drop issues we previously saw in `connect`.
+`1.0.0` is a breaking release because the package now aligns its public API with the Inngest v4 SDK instead of preserving older v3-era names.
 
-## What Changed
+## Upgrade Checklist
 
-This release improves `connect` support in a few ways that matter for migration:
+1. Upgrade to `@torixtv/nestjs-inngest@^1.0.0` and `inngest@^4.0.5`
+2. Ensure your runtime is Node `>=20`
+3. Rename `trigger` to `triggers`
+4. Rename `serveHost` to `serveOrigin`
+5. Rename `rewriteGatewayEndpoint` to `gatewayUrl`
+6. Replace `InngestMiddleware` usage with class-based `Middleware`
+7. Replace any `connect.maxConcurrency` usage with `connect.maxWorkerConcurrency`
+8. Remove any references to removed v3-only exports such as `GetEvents`
+9. Update decorator usage if you want the newer v4 execution controls
+10. Run a local registration and execution smoke test against the Inngest dev server
 
-- The package now targets `inngest@3.52.6`
-- `maxWorkerConcurrency` is now the primary documented concurrency setting
-- `connect.isolateExecution` is now supported, typed, and forwarded to the SDK
-- Connection health checks now understand the current SDK's same-thread internal shape
-- When `isolateExecution` is enabled, health checks intentionally fall back to SDK state instead of raw WebSocket inspection
+## Breaking Changes At A Glance
 
-## Why Previous Connect Rollouts Were Painful
+| Previous package surface | `1.0.0` surface | What you need to do |
+| --- | --- | --- |
+| `trigger` | `triggers` | Rename the config property in `@InngestFunction(...)` |
+| `serveHost` | `serveOrigin` | Rename serve-mode registration config |
+| `rewriteGatewayEndpoint` | `gatewayUrl` | Rename connect-mode gateway override |
+| `InngestMiddleware` | `Middleware.BaseMiddleware` or `Middleware.Class` | Rewrite middleware definitions and `@UseMiddleware(...)` usage |
+| `connect.maxConcurrency` | `connect.maxWorkerConcurrency` | Rename the option |
+| `GetEvents` export | Removed | Stop importing it; use the v4 `inngest` types you actually need |
+| `inngest@^3.x` | `inngest@^4.0.5` | Upgrade the SDK |
+| Node `<20` | Node `>=20` | Upgrade the runtime |
 
-The biggest risk with `connect` is that the worker can look healthy at the process level while the underlying connection is degraded or repeatedly reconnecting.
+## Install And Runtime Requirements
 
-Common causes:
+Before:
 
-- Event-loop blocking or CPU-heavy code delays heartbeats
-- Running worker execution in the same busy process as unrelated HTTP or batch work
-- Aggressive concurrency before the worker behavior is well understood
-- Weak readiness/liveness signals during rollout
+```bash
+npm install @torixtv/nestjs-inngest inngest
+```
 
-`isolateExecution: true` is specifically interesting here because it moves the SDK's connection-management loop into a worker thread, which can reduce false disconnects caused by blocked user code on the main thread.
+After:
 
-## Migration Strategy
+```bash
+npm install @torixtv/nestjs-inngest@^1.0.0 inngest@^4.0.5
+```
 
-Do not switch every existing `serve` consumer in place on day one.
+Runtime requirement:
 
-Recommended rollout:
+```text
+Node >=20
+```
 
-1. Start with one dedicated `connect` worker deployment.
-2. Validate in a non-production Inngest environment first.
-3. Keep the rollout small: one replica, low concurrency, clear health probes.
-4. Observe for reconnect churn before increasing replicas or concurrency.
-5. Roll back by redeploying the previous `serve` configuration if connection stability is not acceptable.
+## Function Configuration Changes
 
-For initial validation, prefer a separate Inngest environment or otherwise isolated test target. Avoid mixing `serve` and `connect` replicas for the same app/environment during cutover unless you are doing that deliberately and understand the overlap.
+### `trigger` -> `triggers`
 
-## Recommended First Configuration
+Before:
+
+```typescript
+@InngestFunction({
+  id: 'process-order',
+  trigger: { event: 'order.created' },
+})
+async processOrder({ event, step }) {
+  // ...
+}
+```
+
+After:
+
+```typescript
+@InngestFunction({
+  id: 'process-order',
+  triggers: { event: 'order.created' },
+})
+async processOrder({ event, step }) {
+  // ...
+}
+```
+
+`triggers` accepts either a single trigger or an array of triggers.
+
+### Multiple triggers on a single function
+
+You can now model this directly without workarounds.
+
+```typescript
+@InngestFunction({
+  id: 'sync-account',
+  triggers: [
+    { event: 'account.sync.requested' },
+    { event: 'account.resync.requested' },
+  ],
+})
+async syncAccount({ event, step }) {
+  // ...
+}
+```
+
+The `@InngestEvent(...)` shorthand also accepts arrays, conditional trigger objects, and `eventType(...)` values.
+
+## Decorator Changes
+
+### Existing decorators with expanded support
+
+`1.0.0` keeps the existing decorator-first model, but expands it to cover the v4 execution controls.
+
+#### `@Concurrency`
+
+Before you could only express the simple numeric form reliably.
+
+Now you can use all of these:
+
+```typescript
+@Concurrency(5)
+
+@Concurrency({ limit: 2, key: 'event.data.accountId' })
+
+@Concurrency([
+  { limit: 1, key: 'event.data.accountId' },
+  { limit: 5, key: 'event.data.userId' },
+])
+```
+
+#### `@Debounce`
+
+Before:
+
+```typescript
+@Debounce('5s', 'event.data.documentId')
+```
+
+After:
+
+```typescript
+@Debounce('5s', 'event.data.documentId', '5m')
+```
+
+The third argument is the optional `timeout`.
+
+#### `@BatchEvents`
+
+Before, the wrapper did not expose all v4 fields.
+
+After:
+
+```typescript
+@BatchEvents(25, '30s', {
+  key: 'event.data.accountId',
+  if: 'event.data.enabled == true',
+})
+```
+
+### New decorator-first execution controls
+
+The package now supports these decorators directly:
+
+- `@BatchEvents`
+- `@CancelOn`
+- `@Singleton`
+- `@Priority`
+- `@Idempotency`
+- `@Timeouts`
+- `@OptimizeParallelism`
+- `@Checkpointing`
+- `@OnFailure`
+
+Example:
+
+```typescript
+@InngestFunction({
+  id: 'sync-account',
+  triggers: { event: 'account.sync.requested' },
+})
+@Concurrency([
+  { limit: 1, key: 'event.data.accountId' },
+  { limit: 5, key: 'event.data.userId' },
+])
+@BatchEvents(25, '30s', {
+  key: 'event.data.accountId',
+  if: 'event.data.priority != "low"',
+})
+@CancelOn([
+  { event: 'account.sync.cancelled', match: 'data.accountId' },
+  { event: 'account.deleted', match: 'data.accountId' },
+])
+@Singleton({ mode: 'cancel', key: 'event.data.accountId' })
+@Priority('event.data.priority')
+@Idempotency('event.data.requestId')
+@Timeouts({ start: '5m', finish: '30m' })
+@OptimizeParallelism(true)
+@Checkpointing({ maxRuntime: '1h', bufferedSteps: 10, maxInterval: '5m' })
+@OnFailure('handleSyncFailure')
+async syncAccount({ event, step }) {
+  // ...
+}
+
+async handleSyncFailure({ event, step }) {
+  // ...
+}
+```
+
+### `@OnFailure` migration pattern
+
+The new failure-handler path is method-based:
+
+```typescript
+@InngestFunction({
+  id: 'import-catalog',
+  triggers: { event: 'catalog.import.requested' },
+})
+@OnFailure('handleCatalogImportFailure')
+async importCatalog({ event, step }) {
+  // ...
+}
+
+async handleCatalogImportFailure({ event, step }) {
+  // ...
+}
+```
+
+Rules:
+
+- The referenced method must exist on the same class
+- It should be a normal class method, not a separate independently decorated Inngest function unless you intend that explicitly
+- Invalid method references fail during registration
+
+## Middleware Migration
+
+### `InngestMiddleware` -> class-based `Middleware`
+
+Before:
+
+```typescript
+const loggingMiddleware = new InngestMiddleware({
+  name: 'logging',
+});
+
+@UseMiddleware(loggingMiddleware)
+async myFunction({ event, step }) {
+  // ...
+}
+```
+
+After:
+
+```typescript
+import { Middleware, UseMiddleware } from '@torixtv/nestjs-inngest';
+
+class LoggingMiddleware extends Middleware.BaseMiddleware {
+  readonly id = 'logging';
+}
+
+@UseMiddleware(LoggingMiddleware)
+async myFunction({ event, step }) {
+  // ...
+}
+```
+
+You can also pass middleware classes globally through the module config:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  middleware: [LoggingMiddleware],
+});
+```
+
+## Module Configuration Changes
+
+### Serve mode
+
+Before:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  baseUrl: 'http://localhost:8288',
+  serveHost: 'https://api.example.com',
+  servePort: 3000,
+});
+```
+
+After:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  baseUrl: 'http://localhost:8288',
+  serveOrigin: 'https://api.example.com',
+  servePort: 3000,
+});
+```
+
+If you are rotating keys, `1.0.0` also supports `signingKeyFallback`.
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+  signingKeyFallback: process.env.INNGEST_SIGNING_KEY_FALLBACK,
+});
+```
+
+### Connect mode
+
+Before:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'connect',
+  connect: {
+    rewriteGatewayEndpoint: 'ws://localhost:8288/connect',
+    maxConcurrency: 10,
+  },
+});
+```
+
+After:
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'connect',
+  connect: {
+    gatewayUrl: 'ws://localhost:8288/connect',
+    maxWorkerConcurrency: 10,
+  },
+});
+```
+
+Recommended starting point for a first connect rollout:
 
 ```typescript
 InngestModule.forRoot({
@@ -58,81 +347,63 @@ InngestModule.forRoot({
 });
 ```
 
-```bash
-INNGEST_MODE=connect
-INNGEST_SIGNING_KEY=...
-INNGEST_INSTANCE_ID=worker-1
-INNGEST_CONNECT_MAX_WORKER_CONCURRENCY=2
-INNGEST_CONNECT_ISOLATE_EXECUTION=true
-INNGEST_SHUTDOWN_TIMEOUT=60000
-```
+## Imports And Re-exports
 
-Recommended starting point:
+### Removed or renamed
 
-- Use a dedicated worker deployment if possible
-- Start with `maxWorkerConcurrency: 1` or `2`
-- Prefer `isolateExecution: true` for the first migration if previous failures looked like heartbeat drops or random disconnects
-- Set `instanceId` explicitly so logs and diagnostics are easier to follow
+- `GetEvents` is no longer exported
+- `InngestMiddleware` is no longer exported
 
-## What Changes for Consumers
+### New or now-important re-exports
 
-Most application code does not need to change.
+These helpers are re-exported from `inngest` through this package:
 
-What stays the same:
+- `Middleware`
+- `eventType`
+- `cron`
+- `invoke`
+- `staticSchema`
+- `referenceFunction`
+- `group`
+- `step`
+- `GetFunctionOutput`
+- `StepError`
+- `NonRetriableError`
+- `RetryAfterError`
 
-- Function definitions
-- Event sending via `InngestService.send()`
-- Health and monitoring modules
+## What Does Not Change
 
-What changes:
+Most application logic does not need to change:
 
-- Function execution no longer depends on Inngest calling your HTTP `serve` endpoint
-- The worker now maintains an outbound connection to Inngest
-- Readiness should be based on `connect` health, not only on HTTP process uptime
+- `InngestService.send(...)` still sends events the same way
+- `@InngestEvent(...)` and `@InngestCron(...)` are still the main shorthand decorators
+- Step-based workflow code using `step.run()`, `step.waitForEvent()`, `step.sendEvent()`, `step.sleep()`, and `step.sleepUntil()` stays the same
+- Health checks, monitoring, and tracing remain available
 
-## Rollout Checklist
+## Recommended Verification After Upgrading
 
-- Confirm `signingKey` is available in the target environment
-- Set a stable, explicit `instanceId`
-- Start with low `maxWorkerConcurrency`
-- Expose `/health/inngest` and use it for readiness/liveness
-- Watch for sustained `RECONNECTING`, `PAUSED`, or repeated transitions out of `ACTIVE`
-- Roll out one replica before horizontal scaling
-- Increase concurrency only after the connection remains stable under normal traffic
+After you update the package and rename the breaking APIs:
 
-## Health Expectations
+1. Run `npm install`
+2. Run `npm run build`
+3. Start the Inngest dev server with `inngest dev`
+4. Start your NestJS app
+5. Verify your functions register in the Inngest dev UI
+6. Send a real event and confirm the function runs
+7. If you use connect mode, confirm the worker reaches `ACTIVE`
+8. If you use `@OnFailure`, trigger a controlled failure and verify the handler runs
 
-In same-thread `connect` mode, this package can inspect the underlying WebSocket more directly.
+## Common Upgrade Mistakes
 
-In `isolateExecution` mode, the SDK keeps connection internals inside its worker thread, so this package falls back to the SDK's public connection state for health reporting.
+- Renaming `trigger` to `triggers` in some functions but not all
+- Keeping `serveHost` or `rewriteGatewayEndpoint` in config
+- Passing old middleware instances to `@UseMiddleware(...)` instead of middleware classes
+- Keeping `connect.maxConcurrency` instead of `connect.maxWorkerConcurrency`
+- Forgetting the Node `>=20` runtime requirement
+- Assuming old names still exist as compatibility aliases
 
-That means:
+## Need More Detail?
 
-- `ACTIVE` is the key steady-state target
-- Short reconnects may happen during network disturbances
-- Repeated or prolonged `RECONNECTING` is a rollout blocker
-
-## Known Caveats
-
-- Do not combine `connect.isolateExecution` with `connect.rewriteGatewayEndpoint`
-- Do not begin with high concurrency just because `serve` was stable
-- Do not treat "process is up" as proof that the Inngest connection is healthy
-
-## Troubleshooting Connection Drops
-
-If the worker still appears to die or flap:
-
-- Turn on `isolateExecution` if it is currently off
-- Reduce `maxWorkerConcurrency`
-- Check whether the process is doing CPU-heavy synchronous work
-- Separate the worker from unrelated HTTP traffic or batch jobs
-- Verify readiness probes are checking `/health/inngest`
-- Watch logs for repeated reconnect cycles tied to deployment, scaling, or resource pressure
-
-## Suggested Cutover Order
-
-1. Deploy one `connect` worker in a non-production environment.
-2. Verify it reaches and stays in `ACTIVE`.
-3. Exercise real functions with low concurrency.
-4. Repeat in production with one replica.
-5. Increase replicas or concurrency only after connection stability is proven.
+- See [README.md](./README.md) for current API usage and examples
+- See [DECORATORS.md](./DECORATORS.md) for detailed decorator semantics
+- See [CHANGELOG.md](./CHANGELOG.md) for the release summary

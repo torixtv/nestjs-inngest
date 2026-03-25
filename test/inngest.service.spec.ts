@@ -46,7 +46,7 @@ describe('InngestService', () => {
       const fn = service.createFunction(
         {
           id: 'test-function',
-          trigger: { event: 'test.event' },
+          triggers: [{ event: 'test.event' }],
         },
         async ({ event, step }: { event: any; step: any }) => {
           return { success: true };
@@ -145,10 +145,10 @@ describe('InngestService', () => {
   });
 
   describe('buildConnectConfig', () => {
-    it('should map maxConcurrency to maxWorkerConcurrency for the SDK', () => {
+    it('should forward maxWorkerConcurrency to the SDK', () => {
       const connectConfig = (service as any).buildConnectConfig({
         instanceId: 'worker-1',
-        maxConcurrency: 4,
+        maxWorkerConcurrency: 4,
       });
 
       expect(connectConfig).toMatchObject({
@@ -170,15 +170,14 @@ describe('InngestService', () => {
       });
     });
 
-    it('should reject rewriteGatewayEndpoint when isolateExecution is enabled', () => {
-      expect(() =>
-        (service as any).buildConnectConfig({
-          isolateExecution: true,
-          rewriteGatewayEndpoint: (url: string) => url,
-        }),
-      ).toThrow(
-        'connect.rewriteGatewayEndpoint is not supported when connect.isolateExecution is enabled',
-      );
+    it('should forward gatewayUrl to the SDK connect config', () => {
+      const connectConfig = (service as any).buildConnectConfig({
+        gatewayUrl: 'ws://localhost:8288/connect',
+      });
+
+      expect(connectConfig).toMatchObject({
+        gatewayUrl: 'ws://localhost:8288/connect',
+      });
     });
   });
 });

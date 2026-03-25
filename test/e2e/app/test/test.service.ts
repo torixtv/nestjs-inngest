@@ -17,7 +17,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-simple-handler',
-    trigger: { event: 'test.simple' }
+    triggers: { event: 'test.simple' }
   })
   async handleSimpleTest({ event, step, ctx }: any) {
     const message = event.data?.message || event.message || 'default message';
@@ -72,7 +72,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-workflow-handler',
-    trigger: { event: 'test.workflow' }
+    triggers: { event: 'test.workflow' }
   })
   async handleWorkflowTest({ event, step, ctx }: any) {
     this.logger.log('Handling workflow test event', {
@@ -91,7 +91,8 @@ export class TestService {
     });
 
     // Step 2: Send follow-up event (demonstrates trace context propagation)
-    await step.sendEvent('test.workflow.step', {
+    await step.sendEvent('send-workflow-step', {
+      name: 'test.workflow.step',
       data: {
         workflowId: init.workflowId,
         step: 'step1',
@@ -123,7 +124,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-workflow-step-handler',
-    trigger: { event: 'test.workflow.step' }
+    triggers: { event: 'test.workflow.step' }
   })
   async handleWorkflowStep({ event, step, ctx }: any) {
     this.logger.log('Handling workflow step', {
@@ -145,7 +146,8 @@ export class TestService {
 
     // Conditionally send another event to test chaining
     if (event.data.enableChain) {
-      await step.sendEvent('test.workflow.complete', {
+      await step.sendEvent('send-workflow-complete', {
+        name: 'test.workflow.complete',
         data: {
           workflowId: event.data.workflowId,
           finalStep: true,
@@ -163,7 +165,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-workflow-complete-handler',
-    trigger: { event: 'test.workflow.complete' }
+    triggers: { event: 'test.workflow.complete' }
   })
   async handleWorkflowComplete({ event, step, ctx }: any) {
     this.logger.log('Completing workflow', {
@@ -193,7 +195,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-complex-handler',
-    trigger: { event: 'test.complex' }
+    triggers: { event: 'test.complex' }
   })
   async handleComplexTest({ event, step, ctx }: any) {
     const iterations = event.data?.iterations || 3;
@@ -376,7 +378,7 @@ export class TestService {
    */
   @InngestFunction({
     id: 'test-error-handler',
-    trigger: { event: 'test.error' }
+    triggers: { event: 'test.error' }
   })
   async handleErrorTest({ event, step, ctx }: any) {
     this.logger.log('Handling error test event', {
@@ -461,7 +463,7 @@ export class TestService {
   @InngestFunction({
     id: 'trace-propagation-test',
     name: 'TraceId Propagation Test Function',
-    trigger: { event: 'test.trace.propagation' },
+    triggers: { event: 'test.trace.propagation' },
     retries: 1
   })
   async handleTracePropagationTest({ event, step, ctx }: any) {
@@ -543,7 +545,7 @@ export class TestService {
   @InngestFunction({
     id: 'trace-child-handler',
     name: 'Trace Child Handler',
-    trigger: { event: 'test.trace.child' },
+    triggers: { event: 'test.trace.child' },
     retries: 1
   })
   async handleTraceChild({ event, step, ctx }: any) {
@@ -624,7 +626,7 @@ export class TestService {
   @InngestFunction({
     id: 'complex-workflow-trace-test',
     name: 'Complex Workflow Trace Test',
-    trigger: { event: 'test.complex.workflow' },
+    triggers: { event: 'test.complex.workflow' },
     retries: 2
   })
   async handleComplexWorkflowTrace({ event, step, ctx }: any) {
@@ -701,7 +703,7 @@ export class TestService {
   @InngestFunction({
     id: 'workflow-branch-handler',
     name: 'Workflow Branch Handler',
-    trigger: { event: 'test.workflow.branch' },
+    triggers: { event: 'test.workflow.branch' },
     retries: 1
   })
   async handleWorkflowBranch({ event, step, ctx }: any) {
@@ -753,7 +755,7 @@ export class TestService {
   @InngestFunction({
     id: 'error-trace-test',
     name: 'Error Trace Test Function',
-    trigger: { event: 'test.error.trace' },
+    triggers: { event: 'test.error.trace' },
     retries: 3
   })
   async handleErrorTrace({ event, step, ctx }: any) {
