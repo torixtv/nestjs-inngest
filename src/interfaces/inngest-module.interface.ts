@@ -74,6 +74,67 @@ export interface InngestConnectOptions {
    * @default 30000
    */
   shutdownTimeout?: number;
+
+  /**
+   * Connection watchdog. Enabled by default in connect mode.
+   * See {@link InngestConnectWatchdogOptions}.
+   */
+  watchdog?: InngestConnectWatchdogOptions;
+}
+
+/**
+ * Client-side watchdog for the connect-mode worker connection.
+ *
+ * It repairs TRANSPORT failures (SDK not ACTIVE, or ACTIVE with no gateway heartbeat)
+ * by forcing a reconnect, and reports not-live if that does not recover them. It does
+ * NOT fail liveness when Inngest simply stops dispatching runs: that is a vendor-side
+ * stall a restart cannot fix. Configure `idleWarnAfterMs` to log it instead.
+ */
+export interface InngestConnectWatchdogOptions {
+  /** @default true */
+  enabled?: boolean;
+  /** How often the watchdog evaluates the connection. @default 15000 */
+  checkIntervalMs?: number;
+  /**
+   * Age of the last gateway heartbeat reply after which an "ACTIVE" connection is treated
+   * as dead. The SDK heartbeats every 10s and refreshes worker-thread state every 5s.
+   * @default 60000
+   */
+  heartbeatStaleMs?: number;
+  /** How long a transport problem must persist before a forced reconnect. @default 120000 */
+  reconnectAfterMs?: number;
+  /** Minimum gap between forced reconnects. @default 300000 */
+  minReconnectIntervalMs?: number;
+  /**
+   * How long a transport problem may persist before `isLive()` reports down, so a
+   * liveness probe wired to it restarts the pod. @default 600000
+   */
+  livenessFailAfterMs?: number;
+  /**
+   * When set, log one warning per episode once this process has executed no function for
+   * this long while the connection is healthy. Only meaningful for apps with frequent
+   * crons. Never affects liveness or readiness. @default undefined (off)
+   */
+  idleWarnAfterMs?: number;
+}
+
+/** Snapshot of the connect watchdog, exposed through health details. */
+export interface ConnectWatchdogStatus {
+  enabled: boolean;
+  /** False while the SDK is not ACTIVE or gateway heartbeats are stale. */
+  transportHealthy: boolean;
+  unhealthyReason: string | null;
+  unhealthySince: number | null;
+  unhealthyForMs: number;
+  /** False once a transport problem outlives `livenessFailAfterMs`. */
+  live: boolean;
+  lastExecutionAt: number | null;
+  msSinceLastExecution: number | null;
+  /** True when `idleWarnAfterMs` is set and exceeded. Informational only. */
+  idle: boolean;
+  reconnectAttempts: number;
+  lastReconnectAt: number | null;
+  lastReconnectError: string | null;
 }
 
 export interface InngestMonitoringConfig {

@@ -55,7 +55,11 @@ export {
   // Connection health types
   ConnectionHealthInfo,
   WebSocketReadyState,
+  // Connection watchdog types
+  InngestConnectWatchdogOptions,
+  ConnectWatchdogStatus,
 } from './interfaces';
+export { ConnectWatchdog } from './services/connect-watchdog';
 
 // Configuration validation exports
 export {

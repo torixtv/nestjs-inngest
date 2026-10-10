@@ -199,6 +199,13 @@ export class InngestExplorer implements OnModuleInit {
           } finally {
             const executionTime = Date.now() - startTime;
 
+            // Feed the connect watchdog: proof that runs are reaching this process.
+            try {
+              this.inngestService.recordExecution?.();
+            } catch {
+              // Never let bookkeeping affect the function result.
+            }
+
             // Record metrics if monitoring service is available
             if (this.monitoringService) {
               try {

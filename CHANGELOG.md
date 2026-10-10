@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connect-mode watchdog** (on by default, `connect.watchdog` to tune or disable):
+  forces a reconnect when the SDK stays non-`ACTIVE` or stops receiving gateway heartbeats
+  (including a worker thread whose cached state froze at `ACTIVE`), terminates a worker
+  thread that never acknowledges close, and starts supervising before the first connect
+  resolves.
+- `InngestHealthIndicator.isLive()` for liveness probes: down only after
+  `livenessFailAfterMs` (default 10 min) of unrepaired transport failure.
+- `InngestService.reconnect()`, `getWatchdogStatus()`, `recordExecution()`; health details
+  now carry a `watchdog` block with time since the last execution.
+- Optional `idleWarnAfterMs`: one warning per episode when a healthy connection receives
+  no work (Inngest-side dispatch stall). Never affects liveness.
+
+### Fixed
+
+- `getConnectionState()` reports `CONNECTING` instead of `CLOSED` while the first connect
+  is in progress.
+
 ## [1.0.0] - 2026-03-25
 
 ### Added

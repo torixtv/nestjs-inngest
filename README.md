@@ -1375,6 +1375,48 @@ GET /health/inngest
 }
 ```
 
+### Connection Watchdog (connect mode)
+
+In connect mode a watchdog runs by default. It separates the two ways "functions stopped
+running" can happen, because only one of them is fixable from inside the pod:
+
+| Failure | Example | What the watchdog does |
+|---|---|---|
+| **Transport** | SDK stuck in `RECONNECTING`/`CONNECTING`, a worker thread whose state froze at `ACTIVE` with no gateway heartbeat for `heartbeatStaleMs`, the first connect never completing | Forces a reconnect after `reconnectAfterMs` (rate-limited), and makes `isLive()` report down after `livenessFailAfterMs` so a liveness probe restarts the pod as a last resort |
+| **Dispatch stall** | Heartbeats flow but Inngest Cloud leaves runs `Queued` (2026-10-09 and 2026-10-10, both environments at once) | Never reconnects and never fails liveness — a restart cannot fix it and would only cause a restart storm. With `idleWarnAfterMs` set it logs one warning per episode. Page on it with a cross-service alert. |
+
+```typescript
+connect: {
+  watchdog: {
+    enabled: true,                 // default
+    checkIntervalMs: 15_000,       // default
+    heartbeatStaleMs: 60_000,      // default; SDK heartbeats every 10s
+    reconnectAfterMs: 120_000,     // default
+    minReconnectIntervalMs: 300_000, // default
+    livenessFailAfterMs: 600_000,  // default
+    idleWarnAfterMs: 5 * 60_000,   // default off; only for apps with frequent crons
+  },
+},
+```
+
+Wire liveness to `isLive()`, not `isHealthy()` — `isHealthy()` goes down on any momentary
+non-`ACTIVE` state and is meant for readiness and diagnostics:
+
+```typescript
+@Get('liveness')
+@HealthCheck()
+liveness() {
+  return this.health.check([() => this.inngest.isLive('inngest')]);
+}
+```
+
+Keep Inngest out of readiness for services that also serve HTTP traffic: an Inngest outage
+would otherwise mark every replica NotReady and take the API down with it.
+
+`InngestService.getWatchdogStatus()` and the `watchdog` block in health details expose the
+current state (`transportHealthy`, `unhealthyReason`, `msSinceLastExecution`, `idle`,
+`reconnectAttempts`). `InngestService.reconnect()` forces a reconnect manually.
+
 ### Kubernetes Deployment with Connect Mode
 
 Connect mode is ideal for Kubernetes because your pods don't need to be publicly accessible:
@@ -2254,6 +2296,11 @@ class InngestHealthIndicator {
 
   // Check if Inngest is ready (includes function registration check)
   isReady(key: string): Promise<HealthIndicatorResult>;
+
+  // Liveness (connect mode): down only after the watchdog failed to repair a
+  // transport problem for connect.watchdog.livenessFailAfterMs. Never down for
+  // brief reconnects or Inngest-side dispatch stalls.
+  isLive(key: string): Promise<HealthIndicatorResult>;
 }
 ```
 

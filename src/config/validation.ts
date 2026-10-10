@@ -12,6 +12,17 @@ export const ConnectOptionsSchema = z
     shutdownTimeout: z.number().min(1000).default(30000),
     isolateExecution: z.boolean().optional(),
     gatewayUrl: z.string().url().optional(),
+    watchdog: z
+      .object({
+        enabled: z.boolean().optional(),
+        checkIntervalMs: z.number().min(1000).optional(),
+        heartbeatStaleMs: z.number().min(1000).optional(),
+        reconnectAfterMs: z.number().min(0).optional(),
+        minReconnectIntervalMs: z.number().min(0).optional(),
+        livenessFailAfterMs: z.number().min(0).optional(),
+        idleWarnAfterMs: z.number().min(1000).optional(),
+      })
+      .optional(),
   })
   .passthrough() // Preserve any additional fields from Inngest SDK updates
   .optional();

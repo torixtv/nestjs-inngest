@@ -92,6 +92,7 @@ export class InngestHealthIndicator {
             wsReadyState: health.wsStateName,
             pendingHeartbeats: health.pendingHeartbeats,
             usingInternalCheck: health.usingInternalCheck,
+            ...this.watchdogDetails(),
           });
         } else {
           this.logger.warn(`Inngest connection unhealthy: ${health.reason}`, {
@@ -110,6 +111,7 @@ export class InngestHealthIndicator {
             wsReadyState: health.wsStateName,
             pendingHeartbeats: health.pendingHeartbeats,
             usingInternalCheck: health.usingInternalCheck,
+            ...this.watchdogDetails(),
           });
         }
       }
@@ -125,6 +127,66 @@ export class InngestHealthIndicator {
         message: error instanceof Error ? error.message : 'Unknown Inngest error',
       });
     }
+  }
+
+  /**
+   * Liveness check for connect mode, backed by the connection watchdog.
+   *
+   * Reports down only when a TRANSPORT problem (SDK not ACTIVE, or no gateway heartbeat)
+   * has persisted past `connect.watchdog.livenessFailAfterMs` (default 10 min) despite the
+   * watchdog's forced reconnects - i.e. when restarting the pod is the remaining remedy.
+   * Brief reconnects and Inngest-side dispatch stalls never fail it, so wiring it into a
+   * Kubernetes liveness probe cannot turn an Inngest outage into a restart storm.
+   *
+   * Prefer this over `isHealthy()` for liveness: `isHealthy()` goes down on any momentary
+   * non-ACTIVE state and is meant for readiness/diagnostics.
+   *
+   * Always up in serve mode or when the watchdog is disabled.
+   */
+  async isLive(key: string): Promise<HealthIndicatorResult> {
+    const check = this.healthIndicatorService.check(key);
+    try {
+      const status = this.inngestService.getWatchdogStatus?.() ?? null;
+      if (!status || status.live) {
+        return check.up({
+          message: status
+            ? status.transportHealthy
+              ? 'Inngest worker connection is live'
+              : `Inngest worker connection recovering: ${status.unhealthyReason}`
+            : 'Inngest watchdog not active',
+          ...this.watchdogDetails(),
+        });
+      }
+      this.logger.error(
+        `Inngest worker connection failed liveness: ${status.unhealthyReason} for ${Math.round(status.unhealthyForMs / 1000)}s after ${status.reconnectAttempts} reconnect attempt(s)`,
+      );
+      return check.down({
+        message: `Inngest worker connection unhealthy for ${Math.round(status.unhealthyForMs / 1000)}s: ${status.unhealthyReason}`,
+        ...this.watchdogDetails(),
+      });
+    } catch (error) {
+      // A bug in the liveness check must never restart pods.
+      return check.up({
+        message: `Inngest liveness check errored (treated as live): ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
+  private watchdogDetails(): Record<string, unknown> {
+    const status = this.inngestService.getWatchdogStatus?.() ?? null;
+    if (!status) return {};
+    return {
+      watchdog: {
+        transportHealthy: status.transportHealthy,
+        unhealthyReason: status.unhealthyReason,
+        unhealthyForMs: status.unhealthyForMs,
+        live: status.live,
+        msSinceLastExecution: status.msSinceLastExecution,
+        idle: status.idle,
+        reconnectAttempts: status.reconnectAttempts,
+        lastReconnectError: status.lastReconnectError,
+      },
+    };
   }
 
   /**
