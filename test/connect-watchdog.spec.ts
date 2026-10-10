@@ -147,6 +147,18 @@ describe('ConnectWatchdog', () => {
     expect(h.watchdog.status()).toMatchObject({ live: true, transportHealthy: true });
   });
 
+  it('keeps a healthy connection live even with livenessFailAfterMs = 0', async () => {
+    const h = harness({ options: { livenessFailAfterMs: 0 } });
+    await h.watchdog.tick();
+    expect(h.watchdog.status()).toMatchObject({ transportHealthy: true, live: true });
+    h.setState('RECONNECTING');
+    await h.watchdog.tick();
+    expect(h.watchdog.status().live).toBe(false);
+    h.setState('ACTIVE');
+    await h.watchdog.tick();
+    expect(h.watchdog.status().live).toBe(true);
+  });
+
   it('records reconnect errors without throwing', async () => {
     const reconnect = jest.fn().mockRejectedValue(new Error('gateway unreachable'));
     const h = harness({ state: 'RECONNECTING', reconnect });

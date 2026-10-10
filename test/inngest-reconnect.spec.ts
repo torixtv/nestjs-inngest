@@ -208,6 +208,62 @@ describe('InngestService reconnect + watchdog wiring (connect mode)', () => {
     expect((service as any).workerConnection).toBeNull();
   });
 
+  it('closes a connection that completes after shutdown already finished waiting', async () => {
+    await build(); // shutdownTimeout 50ms
+    const first = fakeConnection('c1');
+    const late = fakeConnection('c2');
+    let resolveLate: (c: unknown) => void = () => undefined;
+    mockConnect.mockResolvedValueOnce(first).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLate = resolve;
+        }),
+    );
+    await service.establishConnection();
+
+    const reconnecting = service.reconnect('test');
+    await new Promise((r) => setImmediate(r));
+    await service.onApplicationShutdown('SIGTERM'); // gives up waiting after 50ms
+    expect((service as any).workerConnection).toBeNull();
+
+    resolveLate(late);
+    await reconnecting;
+    expect(late.close).toHaveBeenCalledTimes(1);
+    expect((service as any).workerConnection).toBeNull();
+  });
+
+  it('counts a run when it arrives, for createFunction() and createScheduledFunction()', async () => {
+    await build();
+    mockConnect.mockResolvedValueOnce(fakeConnection('c1'));
+    await service.establishConnection();
+
+    const client = service.getClient() as any;
+    const captured: Array<(...args: unknown[]) => unknown> = [];
+    jest.spyOn(client, 'createFunction').mockImplementation((_opts: unknown, handler: any) => {
+      captured.push(handler);
+      return { id: () => 'fn', opts: {} };
+    });
+    jest.spyOn(service as any, 'registerFunction').mockImplementation(() => undefined);
+    const record = jest.spyOn(service, 'recordExecution');
+
+    let release: () => void = () => undefined;
+    const slow = jest.fn(() => new Promise<string>((r) => (release = () => r('done'))));
+    service.createFunction({ id: 'raw', triggers: [{ event: 'x' }] }, slow);
+    service.createScheduledFunction(
+      { id: 'cron', cron: '* * * * *' },
+      jest.fn(() => 'ok'),
+    );
+
+    const pending = captured[0]({ event: {} });
+    expect(record).toHaveBeenCalledTimes(1); // recorded before the handler finished
+    release();
+    await expect(pending).resolves.toBe('done');
+    expect(slow).toHaveBeenCalledWith({ event: {} });
+
+    expect(captured[1]({})).toBe('ok');
+    expect(record).toHaveBeenCalledTimes(2);
+  });
+
   it('stops the watchdog on shutdown', async () => {
     await build();
     mockConnect.mockResolvedValueOnce(fakeConnection('c1'));

@@ -248,11 +248,21 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       this.startWatchdog();
 
       this.connecting = true;
+      let connection: WorkerConnection;
       try {
-        this.workerConnection = (await connect(connectConfig as any)) as WorkerConnection;
+        connection = (await connect(connectConfig as any)) as WorkerConnection;
       } finally {
         this.connecting = false;
       }
+
+      // Shutdown may have started (and finished waiting) while connect() was pending. Never
+      // hand a late worker to the service: it would accept runs after the app has closed.
+      if (this.isShuttingDown) {
+        this.logger.warn('Inngest connection completed after shutdown started; closing it');
+        await this.closeWithTimeout(connection);
+        return;
+      }
+      this.workerConnection = connection;
 
       this.logger.log('Inngest worker connection established', {
         state: this.workerConnection.state,
@@ -826,8 +836,21 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       ...(normalizedTriggers !== undefined && { triggers: normalizedTriggers }),
     };
 
+    // Count work when it ARRIVES (every request, including each step re-entry), for every
+    // creation path: decorated, createFunction() and createScheduledFunction(). Counting on
+    // completion would make long-running handlers look idle to the watchdog.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const service = this;
+    const trackedHandler =
+      typeof handler === 'function'
+        ? function (this: unknown, ...args: unknown[]) {
+            service.recordExecution();
+            return handler.apply(this, args);
+          }
+        : handler;
+
     try {
-      const fn = this.inngestClient.createFunction(functionOptions, handler);
+      const fn = this.inngestClient.createFunction(functionOptions, trackedHandler);
       this.registerFunction(fn);
       return fn;
     } catch (error) {

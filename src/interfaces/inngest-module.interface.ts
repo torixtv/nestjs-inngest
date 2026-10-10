@@ -111,7 +111,7 @@ export interface InngestConnectWatchdogOptions {
    */
   livenessFailAfterMs?: number;
   /**
-   * When set, log one warning per episode once this process has executed no function for
+   * When set, log one warning per episode once this process has received no function run for
    * this long while the connection is healthy. Only meaningful for apps with frequent
    * crons. Never affects liveness or readiness. @default undefined (off)
    */

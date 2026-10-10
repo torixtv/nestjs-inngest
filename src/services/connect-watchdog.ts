@@ -144,7 +144,12 @@ export class ConnectWatchdog {
       unhealthyReason: this.unhealthyReason,
       unhealthySince: this.unhealthySince,
       unhealthyForMs,
-      live: !this.options.enabled || unhealthyForMs < this.options.livenessFailAfterMs,
+      // Only an ACTIVE failure can fail liveness: with livenessFailAfterMs = 0 a healthy
+      // connection (unhealthyForMs 0) must still be live.
+      live:
+        !this.options.enabled ||
+        this.unhealthySince === null ||
+        unhealthyForMs < this.options.livenessFailAfterMs,
       lastExecutionAt: this.lastExecutionAt,
       msSinceLastExecution: this.lastExecutionAt === null ? null : now - this.lastExecutionAt,
       idle,
