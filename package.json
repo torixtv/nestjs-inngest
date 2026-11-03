@@ -83,6 +83,8 @@
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/testing": "^11.1.6",
     "@opentelemetry/auto-instrumentations-node": "^0.56.1",
+    "@swc/core": "1.16.21",
+    "@swc/jest": "0.2.39",
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.3.0",
@@ -99,7 +101,6 @@
     "prettier": "^3.6.2",
     "supertest": "^7.0.0",
     "swagger-ui-express": "^5.0.1",
-    "ts-jest": "^29.4.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.2"
