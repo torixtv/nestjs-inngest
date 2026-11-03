@@ -4,8 +4,31 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.(t|j)s$": [
+      "@swc/jest",
+      {
+        "jsc": {
+          "parser": {
+            "syntax": "typescript",
+            "decorators": true,
+            "dynamicImport": true
+          },
+          "transform": {
+            "legacyDecorator": true,
+            "decoratorMetadata": true
+          },
+          "target": "es2022",
+          "keepClassNames": true,
+          "loose": true
+        },
+        "module": {
+          "type": "commonjs",
+          "importInterop": "none"
+        }
+      }
+    ]
   },
+  "setupFiles": ["<rootDir>/../jest.swc-setup.js"],
   "moduleNameMapper": {
     "^nestjs-inngest$": "<rootDir>/../src/index",
     "^nestjs-inngest/(.*)$": "<rootDir>/../src/$1"
