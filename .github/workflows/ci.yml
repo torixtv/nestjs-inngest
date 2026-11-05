@@ -1,0 +1,40 @@
+name: CI
+
+# Typecheck, unit tests and build on every pull request and on master. Until this file
+# the only workflow was publish.yml, whose test job is commented out, so nothing ran the
+# suite before a release. Lint is left out for now: master still has prettier findings in
+# lines no recent change touched, and a red check on every PR would hide real failures.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Unit tests
+        run: npx jest
+
+      - name: Build
+        run: npm run build
