@@ -767,7 +767,9 @@ GET /health/inngest?details=true
 
 #### @nestjs/terminus Integration
 
-For Kubernetes readiness/liveness probes or existing `@nestjs/terminus` health check setups, use the `InngestHealthIndicator`:
+For Kubernetes probes or existing `@nestjs/terminus` health check setups, use the `InngestHealthIndicator`.
+
+In connect mode, put it on the **startup** probe only, not on readiness or liveness. HTTP requests do not use the worker connection, and from inside one pod a broken worker looks exactly like Inngest being down for everyone. A readiness or liveness probe on the connection therefore takes every pod out of traffic, or restarts every pod, during an Inngest outage: background jobs being delayed becomes the whole API being down. A worker that is broken for good is repaired by the [connection watchdog](#connection-watchdog-connect-mode) instead, and the startup probe still keeps a release that cannot connect from rolling out.
 
 ```bash
 # Install @nestjs/terminus (optional peer dependency)
@@ -802,16 +804,18 @@ export class HealthController {
     private inngest: InngestHealthIndicator,
   ) {}
 
-  @Get('liveness')
+  // Startup probe: the pod starts taking traffic only once its worker is connected.
+  @Get()
   @HealthCheck()
-  liveness(): Promise<HealthCheckResult> {
+  startup(): Promise<HealthCheckResult> {
     return this.health.check([() => this.inngest.isHealthy('inngest')]);
   }
 
+  // Readiness and liveness: your HTTP dependencies (database, cache, ...), not Inngest.
   @Get('readiness')
   @HealthCheck()
   readiness(): Promise<HealthCheckResult> {
-    return this.health.check([() => this.inngest.isReady('inngest')]);
+    return this.health.check([]);
   }
 }
 ```
@@ -836,6 +840,43 @@ Response includes `mode` and `connectionState` fields:
   }
 }
 ```
+
+#### Connection watchdog (connect mode)
+
+The SDK reconnects on its own after an ordinary transport failure, but in two cases it stops for good while its state still reads `RECONNECTING`: its worker thread crashed more than 10 times in a row, or its connection loop died on an unexpected error. Its state can also stay `ACTIVE` after the worker thread has stopped answering. The watchdog, on by default in connect mode, repairs all three inside the process:
+
+- every 15 s it checks the SDK state and, through the public `getDebugState()`, the time of the last gateway heartbeat. A connection that has been `ACTIVE` for a minute without any heartbeat counts as dead too;
+- after 2 min without a working connection it closes the connection and opens a new one, at most once every 5 min;
+- an episode of trouble ends only once the connection has stayed healthy for 2 min, so a worker that breaks again soon after each reconnect stays one episode;
+- after 5 min of trouble, or after 3 forced reconnects within 30 min, it logs an error starting with `Inngest worker has no working connection` (exported as `NO_CONNECTION_ERROR_PREFIX`), and repeats it every minute while the connection is down. Alert on that line;
+- after 3 failed reconnects in a row it stops reconnecting: a `connect()` that throws leaves its SDK worker thread behind with no handle to close it, so retrying would leak one per attempt. The error then asks for a pod restart.
+
+It never drains or restarts the pod, and it leaves a connection alone once the SDK is closing it (`CLOSING`, `CLOSED`). During an Inngest outage that hits every pod, a reconnect is one extra connection attempt per pod and costs nothing else, so the watchdog needs no knowledge of the other pods. If most pods log the error at once, Inngest itself is down and a restart will not help.
+
+Not covered: a first `connect()` that never settles. The SDK hands over the connection only once it is `ACTIVE`, so a pending one cannot be closed or replaced; the error log still fires.
+
+A transport that stays healthy while Inngest stops dispatching runs is out of scope: no client action fixes it.
+
+```typescript
+InngestModule.forRoot({
+  id: 'my-app',
+  mode: 'connect',
+  connect: {
+    watchdog: {
+      // defaults shown
+      enabled: true,
+      checkIntervalMs: 15_000,
+      heartbeatStaleMs: 60_000,
+      reconnectAfterMs: 120_000,
+      minReconnectIntervalMs: 300_000,
+      errorAfterMs: 300_000,
+      errorRepeatMs: 60_000,
+    },
+  },
+});
+```
+
+`InngestService.getWatchdogStatus()` returns the current snapshot, and `InngestService.reconnect(reason)` forces a reconnect by hand (it resolves `false` when it skipped, for example while the first `connect()` is still pending, or when shutdown stopped it before it opened a connection).
 
 ### Configuration
 

@@ -74,6 +74,74 @@ export interface InngestConnectOptions {
    * @default 30000
    */
   shutdownTimeout?: number;
+
+  /**
+   * Connection watchdog. Enabled by default in connect mode.
+   * See {@link InngestConnectWatchdogOptions}.
+   */
+  watchdog?: InngestConnectWatchdogOptions;
+}
+
+/**
+ * Client-side watchdog for the connect-mode worker connection.
+ *
+ * The SDK reconnects on its own after an ordinary transport failure, but in two cases it
+ * stops for good while its state still reads RECONNECTING: the worker thread crashed more
+ * than 10 times in a row, or the connection loop died on an unexpected error. It can also
+ * report ACTIVE after its worker thread has stopped answering. The watchdog repairs all
+ * three by closing the connection and opening a new one, inside the process.
+ *
+ * It never touches readiness or liveness. From inside one pod a broken worker looks the
+ * same as Inngest being down for everyone, and draining or restarting every pod during an
+ * Inngest outage only turns delayed background jobs into a full API outage. A reconnect is
+ * harmless in both cases, so it is the only action taken.
+ */
+export interface InngestConnectWatchdogOptions {
+  /** @default true */
+  enabled?: boolean;
+  /** How often the watchdog evaluates the connection. @default 15000 */
+  checkIntervalMs?: number;
+  /**
+   * Age of the last gateway heartbeat reply after which an "ACTIVE" connection is treated
+   * as dead. The SDK heartbeats every 10s and refreshes worker-thread state every 5s.
+   * @default 60000
+   */
+  heartbeatStaleMs?: number;
+  /**
+   * How long a transport problem must persist before a forced reconnect, and how long the
+   * connection must then stay healthy before the episode counts as over. @default 120000
+   */
+  reconnectAfterMs?: number;
+  /** Minimum gap between forced reconnects. @default 300000 */
+  minReconnectIntervalMs?: number;
+  /**
+   * How long an episode must last before the watchdog logs the error that starts with
+   * `NO_CONNECTION_ERROR_PREFIX`. It is also logged when 3 forced reconnects happened within
+   * 30 min, whatever the episode length. @default 300000
+   */
+  errorAfterMs?: number;
+  /**
+   * How often that error repeats while the connection is broken. Keep it well below the
+   * window of the alert that matches it, or the alert resolves between two lines.
+   * @default 60000
+   */
+  errorRepeatMs?: number;
+}
+
+/** Snapshot of the connect watchdog. */
+export interface ConnectWatchdogStatus {
+  enabled: boolean;
+  /** False from the first failed check until the connection stays healthy again. */
+  transportHealthy: boolean;
+  unhealthyReason: string | null;
+  unhealthySince: number | null;
+  unhealthyForMs: number;
+  reconnectAttempts: number;
+  consecutiveFailedReconnects: number;
+  /** True after 3 failed reconnects in a row: only a pod restart recovers the worker then. */
+  reconnectsStopped: boolean;
+  lastReconnectAt: number | null;
+  lastReconnectError: string | null;
 }
 
 export interface InngestMonitoringConfig {
