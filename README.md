@@ -876,7 +876,7 @@ InngestModule.forRoot({
 });
 ```
 
-`InngestService.getWatchdogStatus()` returns the current snapshot, and `InngestService.reconnect(reason)` forces a reconnect by hand (it resolves `false` when it skipped, for example while the first `connect()` is still pending).
+`InngestService.getWatchdogStatus()` returns the current snapshot, and `InngestService.reconnect(reason)` forces a reconnect by hand (it resolves `false` when it skipped, for example while the first `connect()` is still pending, or when shutdown stopped it before it opened a connection).
 
 ### Configuration
 

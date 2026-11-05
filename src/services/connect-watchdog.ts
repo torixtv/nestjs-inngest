@@ -51,6 +51,12 @@ const FLAP_WINDOW_MS = 30 * 60_000;
  * thread per attempt. Past this point only a pod restart cleans up.
  */
 const MAX_CONSECUTIVE_FAILED_RECONNECTS = 3;
+/**
+ * Retry delay after a skipped reconnect. A skip did nothing, so it starts no cooldown: the
+ * pending first connect() it waited for may throw right after. But not every check, so a
+ * connect() that stays pending for an hour does not log every 15 s.
+ */
+const SKIPPED_RETRY_MS = 60_000;
 
 const ACTIVE = 'ACTIVE';
 /** States the SDK enters only when something called close(): shutdown, never a failure. */
@@ -93,6 +99,8 @@ export class ConnectWatchdog {
   private reconnectAttempts = 0;
   private recentReconnects: number[] = [];
   private consecutiveFailedReconnects = 0;
+  /** Earliest time the next forced reconnect may start. */
+  private nextReconnectAt: number | null = null;
   private lastReconnectAt: number | null = null;
   private lastReconnectError: string | null = null;
 
@@ -292,19 +300,16 @@ export class ConnectWatchdog {
     if (this.unhealthySince === null || this.reconnecting) return;
     if (this.consecutiveFailedReconnects >= MAX_CONSECUTIVE_FAILED_RECONNECTS) return;
     if (now - this.unhealthySince < this.options.reconnectAfterMs) return;
-    if (
-      this.lastReconnectAt !== null &&
-      now - this.lastReconnectAt < this.options.minReconnectIntervalMs
-    ) {
-      return;
-    }
+    if (this.nextReconnectAt !== null && now < this.nextReconnectAt) return;
 
-    this.lastReconnectAt = now;
+    const previousNextReconnectAt = this.nextReconnectAt;
+    this.nextReconnectAt = now + this.options.minReconnectIntervalMs;
     this.reconnectAttempts += 1;
     this.recentReconnects.push(now);
     const attempt = this.reconnectAttempts;
     const reason = this.unhealthyReason ?? 'unknown';
-    this.logger.warn(`Inngest watchdog forcing reconnect (attempt ${attempt}): ${reason}`);
+    // The host logs the start of a real reconnect (with this reason); a skip logs nothing
+    // here, so a long-pending first connect() does not fill the log.
     // Not awaited: a reconnect can take as long as the gateway is unreachable, and the
     // watchdog must keep evaluating (status, error log) meanwhile.
     this.reconnecting = Promise.resolve()
@@ -312,15 +317,22 @@ export class ConnectWatchdog {
       .then(
         (acted) => {
           if (acted === false) {
-            // Skipped: nothing was torn down or opened, so it is not an attempt.
+            // Skipped: nothing was torn down or opened, so it is not an attempt and starts
+            // no cooldown.
             this.reconnectAttempts -= 1;
             this.recentReconnects = this.recentReconnects.filter((t) => t !== now);
+            this.nextReconnectAt = Math.max(previousNextReconnectAt ?? 0, now + SKIPPED_RETRY_MS);
             return;
           }
+          this.lastReconnectAt = now;
           this.lastReconnectError = null;
           this.consecutiveFailedReconnects = 0;
+          this.logger.log(
+            `Inngest watchdog reconnected the worker (attempt ${attempt}): ${reason}`,
+          );
         },
         (error) => {
+          this.lastReconnectAt = now;
           this.lastReconnectError = error instanceof Error ? error.message : String(error);
           this.consecutiveFailedReconnects += 1;
           this.logger.error(`Inngest watchdog reconnect failed: ${this.lastReconnectError}`);

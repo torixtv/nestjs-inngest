@@ -343,6 +343,18 @@ describe('ConnectWatchdog', () => {
       );
     });
 
+    // Greptile round 1: a skip did nothing, so it must not start the 5-min cooldown. The
+    // pending first connect() it waited for may throw right after.
+    it('retries a minute after a skipped reconnect instead of after the cooldown', async () => {
+      const h = harness({ state: null });
+      h.reconnect.mockResolvedValueOnce(false).mockResolvedValue(true);
+      await h.run(135_000); // first try at 2:00, skipped
+      expect(h.reconnect).toHaveBeenCalledTimes(1);
+      await h.run(60_000); // retried at 3:00
+      expect(h.reconnect).toHaveBeenCalledTimes(2);
+      expect(h.watchdog.status().reconnectAttempts).toBe(1);
+    });
+
     it('does not count a skipped reconnect as an attempt', async () => {
       const reconnect = jest.fn().mockResolvedValue(false);
       const h = harness({ state: 'CONNECTING', reconnect });

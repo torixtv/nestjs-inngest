@@ -59,7 +59,9 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   private workerConnection: WorkerConnection | null = null;
   private isShuttingDown = false;
   private watchdog: ConnectWatchdog | null = null;
-  private reconnectInFlight: Promise<void> | null = null;
+  private reconnectInFlight: Promise<boolean> | null = null;
+  /** Whether the skip warning was logged for the connect() currently pending. */
+  private loggedSkipForPendingConnect = false;
   /** True while connect() is awaiting its first ACTIVE state (the SDK retries internally). */
   private connecting = false;
   /** Guard flag to prevent log spam when SDK internals are inaccessible */
@@ -254,6 +256,7 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
       this.startWatchdog();
 
       this.connecting = true;
+      this.loggedSkipForPendingConnect = false;
       let connection: WorkerConnection;
       try {
         connection = (await connect(connectConfig as any)) as WorkerConnection;
@@ -902,17 +905,22 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   /**
    * Close the current worker connection and open a fresh one (connect mode).
    * Used by the watchdog; safe to call manually. Concurrent calls share one attempt.
-   * Resolves true when it reconnected, false when it skipped; rejects when connect() failed.
+   * Resolves true when it opened a new connection, false when it skipped or shutdown
+   * stopped it first; rejects when connect() failed.
    */
   async reconnect(reason = 'manual'): Promise<boolean> {
     if (this.options.mode !== 'connect' || this.isShuttingDown) return false;
-    if (this.reconnectInFlight) return this.reconnectInFlight.then(() => true);
+    if (this.reconnectInFlight) return this.reconnectInFlight;
     if (this.connecting) {
       // connect() is still pending and the SDK is already retrying inside it; a second,
-      // parallel connect would only register a duplicate worker.
-      this.logger.warn('Skipping Inngest reconnect: a connection attempt is still in progress', {
-        reason,
-      });
+      // parallel connect would only register a duplicate worker. Logged once per pending
+      // connect(): the watchdog asks again every minute while it stays pending.
+      if (!this.loggedSkipForPendingConnect) {
+        this.loggedSkipForPendingConnect = true;
+        this.logger.warn('Skipping Inngest reconnect: a connection attempt is still in progress', {
+          reason,
+        });
+      }
       return false;
     }
 
@@ -928,14 +936,15 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
         await this.closeWithTimeout(previous);
       }
 
-      if (this.isShuttingDown) return;
+      if (this.isShuttingDown) return false;
       await this.establishConnection();
+      // establishConnection() returns without a connection when shutdown started meanwhile.
+      return this.workerConnection !== null;
     })().finally(() => {
       this.reconnectInFlight = null;
     });
 
-    await this.reconnectInFlight;
-    return true;
+    return this.reconnectInFlight;
   }
 
   /**

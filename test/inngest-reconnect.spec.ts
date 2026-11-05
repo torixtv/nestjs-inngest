@@ -229,6 +229,48 @@ describe('InngestService reconnect + watchdog wiring (connect mode)', () => {
     expect((service as any).workerConnection).toBeNull();
   });
 
+  // Greptile round 1: shutdown that stops a reconnect before it opens a connection must not
+  // read as success, for the caller or for a concurrent one.
+  it('resolves false when shutdown stops a reconnect before it opens a connection', async () => {
+    await build(); // shutdownTimeout 50ms
+    const wedged = fakeConnection('c1', { hangOnClose: true });
+    mockConnect.mockResolvedValueOnce(wedged);
+    await service.establishConnection();
+
+    const first = service.reconnect('test');
+    const second = service.reconnect('concurrent');
+    await new Promise((r) => setImmediate(r));
+    const shutdown = service.onApplicationShutdown('SIGTERM');
+
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+    await shutdown;
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs the skip warning once per pending connect()', async () => {
+    await build();
+    let resolveConnect: (c: unknown) => void = () => undefined;
+    mockConnect.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveConnect = resolve;
+        }),
+    );
+    const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+    const pending = service.establishConnection();
+    await new Promise((r) => setImmediate(r));
+
+    for (let i = 0; i < 5; i++) await service.reconnect('impatient');
+    const skips = warn.mock.calls.filter(([m]) =>
+      String(m).startsWith('Skipping Inngest reconnect'),
+    );
+    expect(skips).toHaveLength(1);
+
+    resolveConnect(fakeConnection('c1'));
+    await pending;
+  });
+
   it('does not reconnect after shutdown started', async () => {
     await build();
     mockConnect.mockResolvedValueOnce(fakeConnection('c1'));
