@@ -10,6 +10,11 @@ import { InngestService } from '../services/inngest.service';
  *
  * Works with both serve mode (HTTP webhooks) and connect mode (WebSocket).
  *
+ * In connect mode, use it on the startup probe only. From inside one pod a broken worker
+ * looks the same as Inngest being down for everyone, so a readiness or liveness probe on
+ * it drains or restarts every pod during an Inngest outage, although HTTP requests never
+ * use the worker connection. The connection watchdog repairs a broken worker instead.
+ *
  * @example
  * ```typescript
  * // In your health module
@@ -29,9 +34,10 @@ import { InngestService } from '../services/inngest.service';
  *     private inngest: InngestHealthIndicator,
  *   ) {}
  *
- *   @Get('readiness')
+ *   // Startup probe
+ *   @Get()
  *   @HealthCheck()
- *   readiness(): Promise<HealthCheckResult> {
+ *   startup(): Promise<HealthCheckResult> {
  *     return this.health.check([
  *       () => this.inngest.isHealthy('inngest'),
  *     ]);

@@ -18,11 +18,14 @@ import { INNGEST_MODULE_OPTIONS } from '../constants';
 import {
   InngestModuleOptions,
   ConnectionHealthInfo,
+  ConnectWatchdogStatus,
   InngestConnectOptions,
   WebSocketReadyState,
 } from '../interfaces';
 import { InngestTracingService, TraceContext } from '../tracing/tracing.service';
 import * as otelApi from '@opentelemetry/api';
+
+import { ConnectWatchdog, WatchdogDebugState } from './connect-watchdog';
 
 // Type for the WorkerConnection returned by connect()
 interface WorkerConnection {
@@ -30,6 +33,8 @@ interface WorkerConnection {
   state: string;
   close: () => Promise<void>;
   closed: Promise<void>;
+  /** Present on inngest >= 4.2; refreshed every 5s from the worker thread. */
+  getDebugState?: () => WatchdogDebugState;
 }
 
 interface InternalCurrentConnection {
@@ -53,6 +58,10 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
   private functions: InngestFunction<any, any, any>[] = [];
   private workerConnection: WorkerConnection | null = null;
   private isShuttingDown = false;
+  private watchdog: ConnectWatchdog | null = null;
+  private reconnectInFlight: Promise<void> | null = null;
+  /** True while connect() is awaiting its first ACTIVE state (the SDK retries internally). */
+  private connecting = false;
   /** Guard flag to prevent log spam when SDK internals are inaccessible */
   private hasLoggedInternalCheckWarning = false;
 
@@ -239,7 +248,28 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
 
       const connectConfig = this.buildConnectConfig(connectOptions);
 
-      this.workerConnection = (await connect(connectConfig as any)) as WorkerConnection;
+      // Start supervising before the first connect resolves, so a connect() that throws is
+      // retried and a connect() that never settles is still reported (the SDK hands over the
+      // connection only once ACTIVE, so a pending one cannot be closed or replaced).
+      this.startWatchdog();
+
+      this.connecting = true;
+      let connection: WorkerConnection;
+      try {
+        connection = (await connect(connectConfig as any)) as WorkerConnection;
+      } finally {
+        this.connecting = false;
+      }
+
+      // Shutdown may have started (and finished waiting) while connect() was pending. Never
+      // hand a late worker to the service: it would accept runs after the app has closed.
+      if (this.isShuttingDown) {
+        this.logger.warn('Inngest connection completed after shutdown started; closing it');
+        await this.closeWithTimeout(connection);
+        return;
+      }
+      this.workerConnection = connection;
+      this.watchdog?.onConnectionReplaced();
 
       this.logger.log('Inngest worker connection established', {
         state: this.workerConnection.state,
@@ -286,13 +316,31 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
    * Waits for in-flight function executions to complete
    */
   private async gracefulShutdown(reason: string): Promise<void> {
-    // Only relevant for connect mode with an active connection
-    if (this.options.mode !== 'connect' || !this.workerConnection || this.isShuttingDown) {
+    // Only relevant for connect mode
+    if (this.options.mode !== 'connect' || this.isShuttingDown) {
       return;
     }
 
     this.isShuttingDown = true;
+    this.watchdog?.stop();
     const timeout = this.options.connect?.shutdownTimeout ?? 30000;
+
+    // A watchdog reconnect may be mid-flight with no connection assigned yet. Let it land
+    // (bounded) so the connection it opens is closed below instead of leaking past shutdown.
+    if (this.reconnectInFlight) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        this.reconnectInFlight.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeout);
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+    }
+
+    if (!this.workerConnection) {
+      return;
+    }
 
     this.logger.log('Initiating graceful shutdown of Inngest worker connection', {
       reason,
@@ -823,6 +871,123 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     return this.options;
   }
 
+  // ============ CONNECT WATCHDOG ============
+
+  private startWatchdog(): void {
+    if (this.watchdog || this.options.mode !== 'connect') return;
+    const watchdogOptions = this.options.connect?.watchdog;
+    if (watchdogOptions?.enabled === false) return;
+
+    this.watchdog = new ConnectWatchdog(watchdogOptions, {
+      getState: () => {
+        if (this.workerConnection) return this.workerConnection.state;
+        return this.connecting ? 'CONNECTING' : null;
+      },
+      getDebugState: () => {
+        const connection = this.workerConnection;
+        if (!connection || typeof connection.getDebugState !== 'function') return null;
+        return connection.getDebugState();
+      },
+      isShuttingDown: () => this.isShuttingDown,
+      reconnect: (reason) => this.reconnect(reason),
+    });
+    this.watchdog.start();
+  }
+
+  /** Watchdog snapshot (connect mode), or null when the watchdog is not running. */
+  getWatchdogStatus(): ConnectWatchdogStatus | null {
+    return this.watchdog ? this.watchdog.status() : null;
+  }
+
+  /**
+   * Close the current worker connection and open a fresh one (connect mode).
+   * Used by the watchdog; safe to call manually. Concurrent calls share one attempt.
+   * Resolves true when it reconnected, false when it skipped; rejects when connect() failed.
+   */
+  async reconnect(reason = 'manual'): Promise<boolean> {
+    if (this.options.mode !== 'connect' || this.isShuttingDown) return false;
+    if (this.reconnectInFlight) return this.reconnectInFlight.then(() => true);
+    if (this.connecting) {
+      // connect() is still pending and the SDK is already retrying inside it; a second,
+      // parallel connect would only register a duplicate worker.
+      this.logger.warn('Skipping Inngest reconnect: a connection attempt is still in progress', {
+        reason,
+      });
+      return false;
+    }
+
+    this.reconnectInFlight = (async () => {
+      const previous = this.workerConnection;
+      this.logger.warn('Reconnecting Inngest worker connection', {
+        reason,
+        previousState: previous?.state ?? 'NONE',
+      });
+
+      if (previous) {
+        this.workerConnection = null;
+        await this.closeWithTimeout(previous);
+      }
+
+      if (this.isShuttingDown) return;
+      await this.establishConnection();
+    })().finally(() => {
+      this.reconnectInFlight = null;
+    });
+
+    await this.reconnectInFlight;
+    return true;
+  }
+
+  /**
+   * Best-effort close of a connection being replaced. A wedged worker thread may never
+   * acknowledge CLOSE, so bound the wait and then terminate the thread directly.
+   */
+  private async closeWithTimeout(connection: WorkerConnection): Promise<void> {
+    const timeout = this.options.connect?.shutdownTimeout ?? 30000;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        connection.close(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`close() did not finish within ${timeout}ms`)),
+            timeout,
+          );
+        }),
+      ]);
+    } catch (error) {
+      // Since inngest 4.26 close() waits for in-flight runs: a timeout here means those runs
+      // are cut off, and Inngest retries them.
+      this.logger.warn(
+        'Previous Inngest connection did not close cleanly; terminating its worker',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      // Internal: WorkerThreadStrategy keeps its node:worker_threads Worker here.
+      const worker = (connection as any)?.strategy?.worker;
+      if (typeof worker?.terminate !== 'function') {
+        this.logger.error(
+          'Could not terminate the previous Inngest connection: no worker thread is reachable (same-thread strategy, or SDK internals changed). It may keep running next to the new one until the pod restarts.',
+        );
+      } else {
+        try {
+          await worker.terminate();
+        } catch (terminateError) {
+          this.logger.error(
+            'Terminating the previous Inngest worker thread failed. It may keep running next to the new one until the pod restarts.',
+            {
+              error:
+                terminateError instanceof Error ? terminateError.message : String(terminateError),
+            },
+          );
+        }
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   // ============ PUBLIC API FOR CONNECT MODE ============
 
   /**
@@ -842,7 +1007,8 @@ export class InngestService implements OnModuleInit, OnModuleDestroy, OnApplicat
     if (this.options.mode !== 'connect') {
       return 'NOT_APPLICABLE';
     }
-    return this.workerConnection?.state ?? 'CLOSED';
+    if (this.workerConnection) return this.workerConnection.state;
+    return this.connecting ? 'CONNECTING' : 'CLOSED';
   }
 
   /**

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connect-mode connection watchdog**, on by default (`connect.watchdog`). It repairs a worker the SDK has given up on (worker thread crashed more than 10 times in a row, or the connection loop died) and one that reports `ACTIVE` with stale or no heartbeats. After 2 min without a working connection it closes the connection and opens a new one, at most once every 5 min, and stops after 3 failed reconnects in a row. After 5 min of trouble, or 3 forced reconnects within 30 min, it logs an error starting with `NO_CONNECTION_ERROR_PREFIX` and repeats it every minute, for log-based alerts. It never drains or restarts the pod, and never touches a connection the SDK is closing.
+- `InngestService.reconnect(reason)` (resolves `true` when it reconnected, `false` when it skipped) and `InngestService.getWatchdogStatus()`.
+
+### Changed
+
+- `getConnectionState()` reports `CONNECTING` instead of `CLOSED` while the first `connect()` is still pending.
+- Docs: in connect mode, `InngestHealthIndicator` belongs on the startup probe only. A readiness or liveness probe on the worker connection drains or restarts every pod during an Inngest outage.
+
 ## [1.0.0] - 2026-03-25
 
 ### Added
