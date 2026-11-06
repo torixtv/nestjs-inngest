@@ -88,7 +88,10 @@ export class ConnectWatchdog {
   private reconnecting: Promise<void> | null = null;
 
   private unhealthySince: number | null = null;
+  /** The latest problem seen; it can change during an episode (RECONNECTING, then CONNECTING). */
   private unhealthyReason: string | null = null;
+  /** The problem that opened the current episode, for the recovery line. */
+  private episodeCause: string | null = null;
   /** Start of the current healthy streak inside an open episode. */
   private healthySince: number | null = null;
   /** When the watchdog first saw the current connection ACTIVE. */
@@ -194,11 +197,14 @@ export class ConnectWatchdog {
     if (this.healthySince === null) this.healthySince = now;
     if (now - this.healthySince < this.options.reconnectAfterMs) return;
 
+    // Name the cause as a cause: printed bare after "recovered", a stale "SDK state is
+    // RECONNECTING" reads as the state right now, which is ACTIVE.
     this.logger.log(
-      `Inngest worker connection recovered after ${formatDuration(this.healthySince - this.unhealthySince)} (${this.unhealthyReason})`,
+      `Inngest worker connection recovered after ${formatDuration(this.healthySince - this.unhealthySince)}; the outage started with: ${this.episodeCause}`,
     );
     this.unhealthySince = null;
     this.unhealthyReason = null;
+    this.episodeCause = null;
     this.healthySince = null;
     this.lastErrorLoggedAt = null;
     this.consecutiveFailedReconnects = 0;
@@ -208,6 +214,7 @@ export class ConnectWatchdog {
     this.healthySince = null;
     if (this.unhealthySince === null) {
       this.unhealthySince = now;
+      this.episodeCause = problem;
       this.logger.warn(`Inngest worker connection unhealthy: ${problem}`);
     }
     this.unhealthyReason = problem;
@@ -328,7 +335,7 @@ export class ConnectWatchdog {
           this.lastReconnectError = null;
           this.consecutiveFailedReconnects = 0;
           this.logger.log(
-            `Inngest watchdog reconnected the worker (attempt ${attempt}): ${reason}`,
+            `Inngest watchdog reconnected the worker (attempt ${attempt}); triggered by: ${reason}`,
           );
         },
         (error) => {

@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1] - 2026-11-06
+
+### Fixed
+
+- The watchdog's reconnect and recovery log lines now label the cause they print: `reconnected the worker (attempt 1); triggered by: …` and `recovered after 6 min; the outage started with: …`. They used to print it bare, so a stale `SDK state is RECONNECTING` read as the state of a connection that was already `ACTIVE` again. The recovery line now names the problem that opened the outage instead of the last one seen. The error line (`NO_CONNECTION_ERROR_PREFIX`) is unchanged.
+
+## [1.1.0] - 2026-11-06
 
 ### Added
 

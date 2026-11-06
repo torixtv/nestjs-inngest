@@ -87,7 +87,7 @@ describe('ConnectWatchdog', () => {
     expect(h.reconnect).not.toHaveBeenCalled();
     expect(h.logger.error).not.toHaveBeenCalled();
     expect(h.logger.log).toHaveBeenCalledWith(
-      expect.stringContaining('Inngest worker connection recovered after 60s'),
+      'Inngest worker connection recovered after 60s; the outage started with: SDK state is RECONNECTING',
     );
   });
 
@@ -418,6 +418,41 @@ describe('ConnectWatchdog', () => {
     h.setState('ACTIVE');
     await h.run(3 * 60_000);
     expect(h.watchdog.status().transportHealthy).toBe(true);
+  });
+
+  // Staging fault test, 2026-11-06: the success and recovery lines printed the reason bare
+  // ("...: SDK state is RECONNECTING", "recovered after 6 min (SDK state is CONNECTING)"),
+  // which read as the current state of a connection that was already ACTIVE again.
+  it('labels the cause in its reconnect and recovery lines, naming what opened the outage', async () => {
+    let release: (v: boolean) => void = () => undefined;
+    const reconnect = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const h = harness({ state: 'RECONNECTING', reconnect });
+    await h.watchdog.tick();
+    h.advance(120_000);
+    await h.watchdog.tick(); // reconnect starts while the SDK says RECONNECTING
+    h.setState('CONNECTING'); // the replacement connect() is still pending
+    h.advance(240_000);
+    await h.watchdog.tick();
+    expect(h.watchdog.status().unhealthyReason).toBe('SDK state is CONNECTING');
+
+    release(true);
+    await h.watchdog.settled();
+    h.setState('ACTIVE');
+    await h.run(3 * 60_000);
+
+    expect(h.logger.log).toHaveBeenCalledWith(
+      'Inngest watchdog reconnected the worker (attempt 1); triggered by: SDK state is RECONNECTING',
+    );
+    expect(h.logger.log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Inngest worker connection recovered after .+; the outage started with: SDK state is RECONNECTING$/,
+      ),
+    );
   });
 
   it('shares one in-flight tick between concurrent callers', async () => {
