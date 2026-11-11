@@ -195,6 +195,7 @@ describe('Utils', () => {
           runId: 'test-run-id',
           attempt: 0,
         },
+        attempt: 0,
       });
     });
 

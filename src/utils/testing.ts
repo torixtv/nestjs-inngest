@@ -81,6 +81,8 @@ export function createMockInngestContext(overrides?: Partial<any>) {
       runId: 'test-run-id',
       attempt: 0,
     },
+    // The wrapper passes attempt at the top level and on ctx.
+    attempt: 0,
     ...overrides,
   };
 }
