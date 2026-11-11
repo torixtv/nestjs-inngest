@@ -61,6 +61,24 @@ export class MockInngestService {
  * Create a mock Inngest context for testing
  */
 export function createMockInngestContext(overrides?: Partial<any>) {
+  // The wrapper hands a handler the same attempt at the top level and on ctx,
+  // so overriding either one sets both. Two different values describe a run
+  // Inngest never produces, and a retry test would then pass or fail on
+  // whichever field the handler reads; refuse it instead of picking one.
+  const topAttempt = overrides?.attempt;
+  const ctxAttempt = overrides?.ctx?.attempt;
+  if (topAttempt !== undefined && ctxAttempt !== undefined && topAttempt !== ctxAttempt) {
+    throw new Error(
+      `createMockInngestContext: attempt (${topAttempt}) and ctx.attempt (${ctxAttempt}) differ; set one of them`,
+    );
+  }
+  const attempt = topAttempt ?? ctxAttempt ?? 0;
+  const ctx = overrides?.ctx ?? {
+    env: 'test',
+    functionId: 'test-function',
+    runId: 'test-run-id',
+  };
+
   return {
     event: {
       name: 'test.event',
@@ -75,14 +93,8 @@ export function createMockInngestContext(overrides?: Partial<any>) {
       waitForEvent: jest.fn(async () => null),
       sendEvent: jest.fn(async () => {}),
     },
-    ctx: {
-      env: 'test',
-      functionId: 'test-function',
-      runId: 'test-run-id',
-      attempt: 0,
-    },
-    // The wrapper passes attempt at the top level and on ctx.
-    attempt: 0,
     ...overrides,
+    ctx: { ...ctx, attempt },
+    attempt,
   };
 }
