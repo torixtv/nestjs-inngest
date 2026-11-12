@@ -195,6 +195,7 @@ describe('Utils', () => {
           runId: 'test-run-id',
           attempt: 0,
         },
+        attempt: 0,
       });
     });
 
@@ -205,6 +206,31 @@ describe('Utils', () => {
 
       expect(context.event.name).toBe('custom.event');
       expect(context.event.data).toEqual({ custom: true });
+    });
+
+    it('sets ctx.attempt from a top-level attempt override', () => {
+      const context = createMockInngestContext({ attempt: 3 });
+
+      expect(context.attempt).toBe(3);
+      expect(context.ctx).toEqual({
+        env: 'test',
+        functionId: 'test-function',
+        runId: 'test-run-id',
+        attempt: 3,
+      });
+    });
+
+    it('sets the top-level attempt from a ctx.attempt override', () => {
+      const context = createMockInngestContext({ ctx: { runId: 'run-9', attempt: 2 } });
+
+      expect(context.attempt).toBe(2);
+      expect(context.ctx).toEqual({ runId: 'run-9', attempt: 2 });
+    });
+
+    it('rejects an attempt that differs from ctx.attempt', () => {
+      expect(() => createMockInngestContext({ attempt: 3, ctx: { attempt: 1 } })).toThrow(
+        'attempt (3) and ctx.attempt (1) differ',
+      );
     });
   });
 });

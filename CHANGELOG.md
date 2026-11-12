@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-11-11
+
+### Fixed
+
+- Handlers now receive Inngest's `attempt`: at the top level (`{ event, step, ctx, attempt }`) and on `ctx.attempt`, next to `ctx.runId`. The wrapper used to filter both out of `ctx` and never passed `attempt`, so every handler read `undefined` although the declared `ctx: Context` type promised them, and any `attempt`-based retry delay or check silently never applied. `InngestHandlerContext` gains `attempt: number`, and `createMockInngestContext()` sets it.
+- Mind where you compare it: the SDK retries a failed `step.run` on its own, so a `catch` around `step.run` only runs once the step's retries are spent. Compare `attempt` inside the step callback; in such a `catch`, write the final state without an `attempt` check (rethrowing that `StepError` ends the run).
+
 ## [1.1.1] - 2026-11-06
 
 ### Fixed

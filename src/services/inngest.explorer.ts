@@ -158,7 +158,7 @@ export class InngestExplorer implements OnModuleInit {
 
           try {
             // Extract standard parameters from Inngest context
-            const { event, step } = inngestContext;
+            const { event, step, attempt } = inngestContext;
 
             // Bind the handler to the instance to maintain 'this' context
             const boundHandler = handler.bind(instance);
@@ -170,9 +170,12 @@ export class InngestExplorer implements OnModuleInit {
               methodName,
             );
 
-            // Create enhanced context with ALL middleware properties dynamically
-            // Extract only middleware-added properties (exclude standard Inngest context keys)
-            const standardInngestKeys = ['event', 'step', 'events', 'runId', 'attempt', 'logger'];
+            // ctx carries the middleware-added properties plus the run's scalars.
+            // Only the event payloads and the tool objects stay out: handlers get
+            // event and step as their own arguments. attempt and runId were
+            // filtered out here too, so every handler read them as undefined
+            // although the declared `ctx: Context` type promises them.
+            const standardInngestKeys = ['event', 'step', 'events', 'logger'];
             const middlewareProperties = Object.fromEntries(
               Object.entries(inngestContext).filter(([key]) => !standardInngestKeys.includes(key)),
             );
@@ -184,7 +187,7 @@ export class InngestExplorer implements OnModuleInit {
             let result;
             if (handlerMetadata?.useContext) {
               // Pass as context object with enhanced context
-              result = await boundHandler({ event, step, ctx: enhancedCtx });
+              result = await boundHandler({ event, step, ctx: enhancedCtx, attempt });
             } else {
               // Pass as individual parameters with enhanced context
               result = await boundHandler(event, step, enhancedCtx);

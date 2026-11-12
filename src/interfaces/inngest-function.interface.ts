@@ -202,6 +202,13 @@ export interface InngestHandlerContext<TTriggers extends InngestTriggerInput | u
   event: EventPayload | any;
   step: GetStepTools<any>;
   ctx: Context;
+  /**
+   * Zero-indexed attempt of this execution, as Inngest sent it (also on
+   * `ctx.attempt`). Inside a `step.run` callback it is that step's attempt.
+   * A `catch` around `step.run` only runs once the step's retries are spent,
+   * so compare it inside the step, not in such a catch.
+   */
+  attempt: number;
 }
 
 export interface InngestFunctionHandler<
